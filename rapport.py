@@ -340,7 +340,7 @@ def generer(stamp=None, jeu=False):
     if r["accord"]:
         L.append("## Le bot sait-il s'il a réussi ?")
         L.append("")
-        L.append("Le bot déduit l'issue tout seul (check suivant apparu, anneau vert, cercle disparu). "
+        L.append("Le bot déduit l'issue tout seul (check suivant apparu, barre verte, cercle disparu). "
                  "Comparaison avec la vérité, crochetage par crochetage :")
         L.append("")
         for k, v in r["accord"].most_common():

@@ -28,7 +28,7 @@ DIFFICULTES = {
     "dur": (18, 30, 540),
 }
 NB_CHECKS = {"vehicule": (4, 6), "porte": (3, 5)}
-BLEU, ROUGE, ANNEAU, VERT_ANNEAU = "#5aa6d4", "#c93a45", "#06080c", "#2A823C"
+BLEU, ROUGE, ANNEAU, VERT_BARRE = "#5aa6d4", "#c93a45", "#06080c", "#2A823C"
 VERT_TXT, ROUGE_TXT, ACCENT = "#3ddc84", "#ff5a5a", "#E32344"
 ORANGE = "#ff9f1a"
 
@@ -82,7 +82,7 @@ class Simulation:
         root.bind("<KeyPress>", self.clavier)
         root.protocol("WM_DELETE_WINDOW", self.quitter)
         self.j.ev("sim_debut", args=vars(args), ecran=[W, H], k=round(k, 4), centre=[self.cx, self.cy],
-                  couleurs={"bleu": BLEU, "rouge": ROUGE, "anneau": ANNEAU, "vert_anneau": VERT_ANNEAU},
+                  couleurs={"bleu": BLEU, "rouge": ROUGE, "anneau": ANNEAU, "vert_barre": VERT_BARRE},
                   difficultes=DIFFICULTES, version=at.VERSION)
 
     def _overlays_scene(self):
@@ -304,7 +304,15 @@ class Simulation:
         lo, hi = NB_CHECKS[nom]
         nb = self.args.nb or random.randint(lo, hi)
         self.n_cycle += 1
-        self.seq = [self.nouveau_check() for _ in range(nb)]
+        self.seq = []
+        for _ in range(nb):
+            if self.seq and random.random() < self.args.meme_check:
+                p = dict(self.seq[-1])
+                d = random.uniform(-1.5, 1.5)
+                p["debut"], p["fin"] = p["debut"] + d, p["fin"] + d
+                self.seq.append(p)
+            else:
+                self.seq.append(self.nouveau_check())
         self.i = 0
         self.cycle = {"n": self.n_cycle, "type": nom, "t0": time.perf_counter(), "titre": self.info["titre"]}
         self.message("")
@@ -360,9 +368,9 @@ class Simulation:
             self.lancer_check()
 
     def fin_cycle_reussi(self):
-        self.c.itemconfigure(self.anneau, outline=VERT_ANNEAU)
-        self.c.itemconfigure(self.barre, state="hidden")
-        self.etat, self.t_suivant = "vert", time.perf_counter() + 0.7
+        ck = self.ck
+        self.placer_barre(ck["debut"], ck["fin"], VERT_BARRE)
+        self.etat, self.t_suivant = "vert", time.perf_counter() + 0.25
         self.stats["cycles_ok"] += 1
         self.stats["cycles"] += 1
         quoi = "Véhicule déverrouillé" if self.type_scene == "vehicule" else "Porte déverrouillée"
@@ -486,8 +494,6 @@ class Simulation:
         elif maintenant >= self.t_suivant:
             if self.etat == "vert":
                 self.montrer(False)
-                self.c.itemconfigure(self.barre, state="normal")
-                self.c.itemconfigure(self.anneau, outline=ANNEAU)
                 self.message("")
                 self.etat, self.t_suivant = "attente", maintenant + self.args.pause_fin + random.uniform(0.2, 1.0)
                 self.maj_progression()
@@ -555,6 +561,7 @@ class Simulation:
         if nouveau:
             cfg["latence_ms"] = 8
         cfg["fenetre_cible"] = TITRE
+        cfg["serveur_cible"] = None
 
         self.c.itemconfigure(self.lettre, text="Z")
         self.placer_barre(200, 245)
@@ -660,6 +667,8 @@ def main(argv=None):
     p.add_argument("--vitesse", type=float, default=1.0, help="multiplie la vitesse de l'aiguille")
     p.add_argument("--taille", type=int, default=0, help="diamètre du cercle en pixels (défaut : comme le jeu)")
     p.add_argument("--lettres", default="AZERTYQSDFGHWXCVBNKLMPUIOJ", help="lettres possibles")
+    p.add_argument("--meme-check", type=float, default=0.0,
+                   help="probabilité qu'un check reprenne la lettre et la barre du précédent (cas piège)")
     p.add_argument("--nb", type=int, default=0, help="checks par cycle (0 = au hasard : 4-6 véhicule, 3-5 porte)")
     p.add_argument("--pause-fin", type=float, default=1.2, help="pause entre 2 crochetages (s)")
     p.add_argument("--duree", type=float, default=0, help="quitte tout seul après N secondes")

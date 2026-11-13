@@ -4,6 +4,7 @@ import ctypes.wintypes as wt
 import json
 import os
 import platform
+import re
 import sys
 import threading
 import time
@@ -48,9 +49,11 @@ DEFAULT_CONFIG = {
     "anneau": [0.55, 1.05],
     "anneau_auto": True,
     "fenetre_cible": None,
+    "serveur_cible": "bay.life",
     "apprentissage_auto": True,
     "journal": True,
     "captures_echec": True,
+    "overlay": True,
     "bleu_hsv": [[90, 100, 100], [130, 255, 255]],
     "rouge_hsv": [[0, 100, 90], [10, 255, 255], [168, 100, 90], [179, 255, 255]],
     "vert_hsv": [[45, 90, 90], [85, 255, 255]],
@@ -118,6 +121,31 @@ user32.GetAsyncKeyState.argtypes = (ctypes.c_int,)
 user32.GetAsyncKeyState.restype = ctypes.c_short
 user32.GetForegroundWindow.restype = wt.HWND
 user32.GetWindowTextW.argtypes = (wt.HWND, wt.LPWSTR, ctypes.c_int)
+
+
+_SERVEUR = {"t": 0.0, "url": None}
+
+
+def serveur_fivem(max_age=2.0):
+    maintenant = time.monotonic()
+    if maintenant - _SERVEUR["t"] < max_age:
+        return _SERVEUR["url"]
+    _SERVEUR["t"] = maintenant
+    chemin = os.path.join(os.environ.get("LOCALAPPDATA", ""), "FiveM", "FiveM.app", "data", "cache", "crashometry")
+    try:
+        with open(chemin, "rb") as f:
+            urls = re.findall(rb"last_server_url([!-~]+)", f.read())
+        _SERVEUR["url"] = urls[-1].decode("ascii", "replace") if urls else None
+    except OSError:
+        _SERVEUR["url"] = None
+    return _SERVEUR["url"]
+
+
+def serveur_autorise(cible):
+    if not cible:
+        return True, None
+    url = serveur_fivem()
+    return bool(url and cible.lower() in url.lower()), url
 
 
 def titre_premier_plan():
@@ -687,7 +715,6 @@ class Decideur:
             return False
 
         if barre is None:
-            self.prev = None
             return False
         centre, debut, fin, rel = barre
 
@@ -697,8 +724,9 @@ class Decideur:
             self.prev, self.prev_t = rouge, now
         else:
             dv, dt = wrap(rouge - self.prev), now - self.prev_t
-            if abs(dv) > 60 or dt > 0.25:
-                saut = self.saut = abs(dv) > 60
+            ecart = wrap(dv - (self.vit or 0.0) * dt)
+            if abs(ecart) > 60 or dt > 0.25:
+                saut = self.saut = abs(ecart) > 60
                 self.prev, self.prev_t, self.vit = rouge, now, None
             elif abs(dv) >= 0.5 and dt > 0:
                 v = dv / dt
@@ -848,6 +876,7 @@ class Suivi:
         self.j, self.log = journal, log
         self.cycle = self.check = None
         self.n_cycle = 0
+        self.dernier_cycle = None
         self.t_vu = 0.0
         self.apres_vert = False
         self.fins = []
@@ -864,7 +893,7 @@ class Suivi:
         if vert:
             if self.cycle:
                 if self.check:
-                    self._fin_check(now, "réussi" if self.check["appui"] else "vert sans appui", "anneau vert")
+                    self._fin_check(now, "réussi" if self.check["appui"] else "vert sans appui", "barre verte")
                 self._fin_cycle(now, "crocheté")
             self.apres_vert = True
             return
@@ -969,6 +998,7 @@ class Suivi:
         self.stats["crochetages_ok" if resultat == "crocheté" else
                    "crochetages_rates" if resultat == "raté" else "cycles_abandonnes"] += 1
         duree = now - cy["t0"]
+        self.dernier_cycle = {"resultat": resultat, "nb_checks": len(cy["checks"]), "t": now}
         self.j.ev("cycle_fin", cycle=cy["n"], resultat=resultat, nb_checks=len(cy["checks"]),
                   checks=cy["checks"], duree_ms=round(duree * 1000, 1))
         if resultat == "crocheté":
@@ -1057,6 +1087,7 @@ class Moteur:
         self.cercle = False
         self.nb_appuis = self.nb_reussis = 0
         self.nb_crochetages = self.nb_rates = 0
+        self.jeu_devant, self.serveur_ok, self.serveur_url = False, True, None
         self.dernier = ""
         self.version_config = 0
         self.an = None
@@ -1179,6 +1210,8 @@ class Moteur:
             self.log(f"touche_fixe '{fixe}' inconnue")
             return 1
         cible = cfg.get("fenetre_cible")
+        serveur_cible = (cfg.get("serveur_cible") or "").strip() or None
+        t_etat = 0.0
         seuil = float(cfg["seuil"])
         appui_ms = float(cfg["appui_ms"])
         pause_s = float(cfg["pause_boucle_ms"]) / 1000.0
@@ -1207,6 +1240,11 @@ class Moteur:
             dernier, an_prec, inconnue = None, None, False
             try:
                 while not self.stop:
+                    if time.monotonic() - t_etat >= 0.5:
+                        t_etat = time.monotonic()
+                        titre_fg = titre_premier_plan() if cible else ""
+                        self.jeu_devant = not cible or cible.lower() in titre_fg.lower()
+                        self.serveur_ok, self.serveur_url = serveur_autorise(serveur_cible)
                     rc = self.raccourcis
                     if rc and self.touche_quitter and rac.appui(vk_quit):
                         self.log("Bye.")
@@ -1291,10 +1329,15 @@ class Moteur:
                     fins = self.suivi.fins if nouvelle else []
                     if decide:
                         titre = titre_premier_plan() if cible else ""
+                        serveur_ok, url = serveur_autorise(serveur_cible)
                         if cible and cible.lower() not in titre.lower():
                             self.log(f"{nom} PAS envoyé : fenêtre active « {titre[:40]} » (attendu « {cible} »)")
                             self.suivi.appui(maintenant, nom, score, False, self.dec.info,
                                              raison=f"fenêtre active « {titre[:60]} »")
+                        elif not serveur_ok:
+                            self.log(f"{nom} PAS envoyé : serveur « {url or 'inconnu'} » (attendu « {serveur_cible} »)")
+                            self.suivi.appui(maintenant, nom, score, False, self.dec.info,
+                                             raison=f"serveur « {url or 'inconnu'} »")
                         else:
                             appuyer(vkn, appui_ms)
                             self.nb_appuis += 1

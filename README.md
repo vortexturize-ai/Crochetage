@@ -12,7 +12,7 @@
 **Crochetage** joue tout seul le mini-jeu de crochetage de FiveM : portes, véhicules. Un cercle apparaît au
 milieu de l'écran avec une lettre au centre, une barre bleue et une aiguille rouge qui tourne. Dès que
 l'aiguille arrive dans la barre, l'appli appuie sur la bonne lettre. Elle enchaîne les checks (jusqu'à 6,
-barre de taille différente à chaque fois) jusqu'à ce que l'anneau passe au vert : c'est crocheté.
+barre de taille différente à chaque fois). À la fin, la barre passe au vert et le cercle se ferme : c'est crocheté.
 
 <table>
   <tr>
@@ -77,7 +77,7 @@ flowchart LR
     D -->|"pas encore"| A
     E --> F{"check suivant ?"}
     F -->|"oui : réussi"| A
-    F -->|"anneau vert"| G["🔓 Crocheté"]
+    F -->|"barre verte"| G["🔓 Crocheté"]
     F -->|"cercle disparu"| H["❌ Raté"]
 ```
 
@@ -146,28 +146,45 @@ image de plus.
   lettre, barre déplacée, aiguille repartie de zéro).
 
 ### 6. Savoir si c'est réussi
-Dans le jeu, l'anneau ne passe au vert (`#2A823C`) **qu'à la fin**, quand l'objet est crocheté. Le bot
-déduit donc l'issue tout seul :
+Dans le jeu, rien ne passe au vert entre deux checks. À la fin, seule la **barre du dernier check** passe au
+vert (`#2A823C`), puis le cercle se ferme aussitôt : l'objet est crocheté. Le bot déduit donc l'issue tout
+seul :
 
 | Ce qu'il voit après un appui | Ce qu'il en conclut |
 |---|---|
 | le check suivant apparaît | check réussi |
-| l'anneau passe au vert | crocheté (porte, véhicule ouvert) |
+| la barre passe au vert, puis le cercle se ferme | crocheté (porte, véhicule ouvert) |
 | le cercle disparaît sans vert | raté |
 
-Pendant que l'anneau est vert, le bot n'appuie jamais.
+Pendant que la barre est verte, le bot n'appuie jamais.
 
-### 7. Apprendre les lettres
+### 7. Seulement sur Baylife
+Le bot n'appuie que si **FiveM est au premier plan** et que tu es **connecté à Baylife**
+(`fivem://connect/9zj5ay`, `https://gta.bay.life`). FiveM note le dernier serveur rejoint dans
+`%LOCALAPPDATA%\FiveM\FiveM.app\data\cache\crashometry` (`last_server_url`) : le bot le relit avant chaque
+appui. Sur un autre serveur, il reste en veille et le note dans le journal (« PAS envoyé : serveur … »).
+Réglage `serveur_cible` dans `config.json` (`bay.life` par défaut, vide = tous les serveurs).
+
+### 8. L'overlay en jeu
+Dès que le bot est actif et que FiveM est devant, un bandeau s'affiche en haut de l'écran : prêt, crochetage
+en cours (numéro du check), crocheté ou raté, serveur, compteurs. Il ne prend jamais le focus, laisse passer
+les clics et se cache dès que le bot est en pause ou que tu quittes le jeu. Réglage `overlay` dans
+`config.json`.
+
+<p align="center"><img src="docs/overlay.png" alt="L'overlay en jeu" width="380"></p>
+
+### 9. Apprendre les lettres
 - **Tout seul** : sur une lettre inconnue, tu la joues toi-même. Si le check suivant apparaît (ou si
-  l'anneau passe au vert), le bot enregistre l'image comme modèle.
+  la barre passe au vert), le bot enregistre l'image comme modèle.
 - Ou **F8** puis la lettre, ou bien en tapant la lettre dans l'appli (« à nommer »).
 
 ### Résultats des tests
 | Test | Résultat |
 |---|---|
-| Simulation de vol de véhicule et de porte (trafic, gyrophares, pluie), 4 min | **47 / 47** crochetages, **221 / 221** checks, 0 appui en trop |
+| Simulation de vol de véhicule et de porte (trafic, gyrophares, pluie), 4 min | **51 / 51** crochetages, **240 / 240** checks, 0 appui en trop |
+| Cas piège : même lettre et même barre deux fois de suite | **45 / 45** checks |
 | Où tombe l'appui dans la barre (cible 35 %) | **34 % ± 3 %** |
-| Le bot sait-il s'il a réussi ? | d'accord avec la vérité sur **47 / 47** crochetages |
+| Le bot sait-il s'il a réussi ? | d'accord avec la vérité sur **51 / 51** crochetages |
 | Détection du cercle sur 200 scènes générées (nuit, voitures bleues/rouges collées) | **192 / 200**, centre à < 1 px |
 | Vraie capture du jeu | cercle, barre et aiguille trouvés au pixel près |
 
@@ -226,8 +243,8 @@ Clic droit : Activer, Détecter, Simulation, Quitter.
 ## 🧪 La simulation
 **`2_Simulation.bat`** ouvre un crochetage d'entraînement en **plein écran**, façon serveur RP : de nuit,
 sous la pluie, tu voles une berline garée ou tu crochètes une porte d'entrée. Le mini-jeu est copié sur
-le vrai (mêmes tailles et couleurs) : 3 à 6 checks d'affilée, barre de taille variable, anneau vert à la
-fin. Autour : trafic dont les feux rouges passent derrière le cercle, patrouilles de police avec
+le vrai (mêmes tailles et couleurs) : 3 à 6 checks d'affilée, barre de taille variable, barre verte à la
+fin, puis le cercle se ferme. Autour : trafic dont les feux rouges passent derrière le cercle, patrouilles de police avec
 gyrophares rouge / bleu, alarme du véhicule sur un raté, HUD de serveur RP (mini-carte, argent, jauges,
 alerte police).
 
@@ -235,8 +252,8 @@ alerte police).
 
 | | |
 |---|---|
-| <img src="docs/simulation_porte.png" alt="Crochetage d'une porte" width="100%"> | <img src="docs/simulation_crochete.png" alt="Anneau vert : véhicule déverrouillé" width="100%"> |
-| <sub>Crochetage d'une porte</sub> | <sub>Fin du cycle : l'anneau passe au vert</sub> |
+| <img src="docs/simulation_porte.png" alt="Crochetage d'une porte" width="100%"> | <img src="docs/simulation_crochete.png" alt="Barre verte : véhicule déverrouillé" width="100%"> |
+| <sub>Crochetage d'une porte</sub> | <sub>Fin du cycle : la barre passe au vert, puis le cercle se ferme</sub> |
 
 Le bot de la simulation trouve le cercle et apprend les lettres tout seul. **F6** = bot ON/OFF (pour
 jouer toi-même), **Échap** = quitter ; le rapport est généré à la fermeture.
@@ -259,10 +276,12 @@ python simulation.py --duree 300         # s'arrête tout seul après 5 min
 | **Fenêtre du jeu** | Texte que doit contenir le titre de la fenêtre (par défaut « FiveM »). |
 | **Démarrer avec Windows** | Lance l'appli à l'ouverture de session. |
 
-Dans `config.json` : `capture` (`auto` par défaut, `dxgi` ou `mss`), `journal` (journal détaillé, oui par
-défaut) et `captures_echec` (images des ratés, oui par défaut).
+Dans `config.json` : `serveur_cible` (`bay.life` par défaut, vide = tous les serveurs), `overlay` (oui par
+défaut), `capture` (`auto` par défaut, `dxgi` ou `mss`), `journal` (journal détaillé, oui par défaut) et
+`captures_echec` (images des ratés, oui par défaut).
 
 - **« Cercle pas trouvé »** : refais F7 pendant que l'aiguille tourne.
+- **« PAS envoyé : serveur … »** : tu n'es pas connecté à Baylife (ou FiveM n'a pas encore noté le serveur).
 - **« PAS envoyé : fenêtre active … »** : le jeu n'était pas devant, ou son titre ne contient pas
   « FiveM ». Corrige « Fenêtre du jeu ».
 - **Touche ignorée par le jeu** : lance l'appli en administrateur.
