@@ -204,3 +204,9 @@ décor qui bouge derrière. Le bot de la simulation trouve le cercle et apprend 
 
 En ligne de commande : `python autotouche.py --detecter`, `--debug`, ou `--test capture.png` pour tester
 la détection sur une capture d'écran.
+
+---
+
+<p align="center">
+  <sub>Du même auteur : <a href="https://github.com/vortexturize-ai/paperasse"><b>Paperasse</b></a>, tes papiers rangés et expliqués · <a href="https://github.com/vortexturize-ai">profil</a></sub>
+</p>
