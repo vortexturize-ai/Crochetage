@@ -84,6 +84,18 @@ flowchart LR
 Tout se passe dans [`autotouche.py`](autotouche.py), dans la classe `Moteur`. La boucle tourne en continu :
 capture, lecture, décision, et appui si c'est le moment.
 
+**Capture** : par DXGI Desktop Duplication (`dxcam`), avec repli automatique sur `mss` (GDI) si DXGI n'est
+pas disponible. Mesuré sur la zone de 168 px :
+
+| | mss (GDI) | DXGI |
+|---|---|---|
+| Temps d'une capture | 6,0 ms | **0,27 ms** |
+| Nouvelle image du jeu | vue au prochain tour, jusqu'à ~7 ms plus tard | analysée dès qu'elle est affichée |
+| Décision entre deux images | toutes les ~7 ms | toutes les ~1 ms (l'aiguille est extrapolée) |
+
+Le timing ne change pas d'une capture à l'autre (même `latence_ms`) : en simulation, écart moyen entre
+appui prévu et réel de −3,9 ms en DXGI contre −4,3 ms en mss.
+
 ### 1. Trouver le cercle (touche F7)
 Pas besoin de régler une zone à la souris. Pendant qu'un crochetage tourne, **F7** lance la détection :
 1. pendant ~1 s, le bot ne garde que le rouge **qui vient d'apparaître** (l'aiguille qui bouge) ;
@@ -193,7 +205,7 @@ chaque raté, et **les réglages à changer** :
 ## 📦 Installation
 1. Installer [Python 3.12+](https://www.python.org/downloads/) (cocher « Add Python to PATH »).
 2. Télécharger ce dépôt (bouton **Code → Download ZIP**) et le décompresser.
-3. Double-clic sur **`0_installer.bat`** (installe mss, OpenCV, numpy, pystray, Pillow).
+3. Double-clic sur **`0_installer.bat`** (installe dxcam, mss, OpenCV, numpy, pystray, Pillow).
 
 ## 🎮 Utilisation
 1. Double-clic sur **`1_Lancer Crochetage.bat`** : le logo apparaît près de l'horloge (sinon, regarde
@@ -247,8 +259,8 @@ python simulation.py --duree 300         # s'arrête tout seul après 5 min
 | **Fenêtre du jeu** | Texte que doit contenir le titre de la fenêtre (par défaut « FiveM »). |
 | **Démarrer avec Windows** | Lance l'appli à l'ouverture de session. |
 
-Dans `config.json` : `journal` (journal détaillé, oui par défaut) et `captures_echec` (images des ratés,
-oui par défaut).
+Dans `config.json` : `capture` (`auto` par défaut, `dxgi` ou `mss`), `journal` (journal détaillé, oui par
+défaut) et `captures_echec` (images des ratés, oui par défaut).
 
 - **« Cercle pas trouvé »** : refais F7 pendant que l'aiguille tourne.
 - **« PAS envoyé : fenêtre active … »** : le jeu n'était pas devant, ou son titre ne contient pas

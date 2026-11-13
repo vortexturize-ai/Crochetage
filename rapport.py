@@ -93,6 +93,7 @@ def analyser(verite, moteur):
     deb = (par["m_session_debut"] or [{}])[0]
     r["config"] = deb.get("config", {})
     r["version"] = deb.get("version")
+    r["capture"] = (par["m_ecran"] or [{}])[0].get("capture") or "mss"
 
     touches = [e for e in par["v_touche"] if e.get("resultat") in ("ok", "trop tôt", "trop tard")]
     r["positions"] = [e["pos"] for e in touches]
@@ -230,7 +231,8 @@ def generer(stamp=None, jeu=False):
     cfg = r["config"]
     if cfg:
         L.append(f"Moteur v{r['version']} · latence_ms **{cfg.get('latence_ms')}** · cible **{cfg.get('cible')}** · "
-                 f"marge_deg {cfg.get('marge_deg')} · seuil {cfg.get('seuil')} · zone {cfg.get('zone', {}).get('width')} px")
+                 f"marge_deg {cfg.get('marge_deg')} · seuil {cfg.get('seuil')} · zone {cfg.get('zone', {}).get('width')} px · "
+                 f"capture **{r['capture']}**")
     L.append("")
 
     L.append("## Résultats")

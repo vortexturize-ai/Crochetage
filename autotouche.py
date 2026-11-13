@@ -58,6 +58,7 @@ DEFAULT_CONFIG = {
     "min_pixels_rouge": 5,
     "binaire": None,
     "pause_boucle_ms": 0,
+    "capture": "auto",
     "touche_on_off": "F6",
     "touche_detecter": "F7",
     "touche_capture": "F8",
@@ -986,6 +987,57 @@ class Suivi:
         self._fin_cycle(now, "raté" if rate else "abandonné")
 
 
+class Capture:
+    def __init__(self, sct, mode="auto"):
+        self.sct, self.mode, self.raison, self.cam = sct, "mss", None, None
+        self.derniere, self.ecran = None, None
+        if mode not in ("auto", "dxgi", "mss"):
+            self.raison = f"mode de capture inconnu : {mode}"
+        if mode in ("auto", "dxgi"):
+            try:
+                import dxcam
+                self.cam = dxcam.create(output_color="BGRA")
+                mon = sct.monitors[1]
+                self.ecran = (mon["left"], mon["top"], mon["width"], mon["height"])
+                self.mode = "dxgi"
+            except Exception as e:
+                self.cam, self.raison = None, f"DXGI indisponible : {e}"
+
+    def _region(self, z):
+        l, t, w, h = self.ecran
+        x0, y0 = z["left"] - l, z["top"] - t
+        if x0 < 0 or y0 < 0 or x0 + z["width"] > w or y0 + z["height"] > h:
+            return None
+        return (x0, y0, x0 + z["width"], y0 + z["height"])
+
+    def image(self, zone):
+        if self.cam is not None:
+            r = self._region(zone)
+            if r is not None:
+                try:
+                    f = self.cam.grab(region=r)
+                except Exception as e:
+                    self.raison = f"DXGI en erreur, repli sur mss : {e}"
+                    self.fermer()
+                    f, r = None, None
+                if f is not None:
+                    self.derniere = f
+                    return f, True
+                if r is not None and self.derniere is not None and self.derniere.shape[:2] == (zone["height"], zone["width"]):
+                    return self.derniere, False
+        f = np.asarray(self.sct.grab(zone))
+        self.derniere = f
+        return f, True
+
+    def fermer(self):
+        if self.cam is not None:
+            try:
+                self.cam.release()
+            except Exception:
+                pass
+            self.cam, self.mode = None, "mss"
+
+
 class Moteur:
 
     def __init__(self, cfg, log=print, debug=False, actif=False, touche_quitter=True,
@@ -1146,156 +1198,176 @@ class Moteur:
 
         with MSS() as sct:
             self.sct = sct
+            cap = Capture(sct, str(cfg.get("capture") or "auto").lower())
+            self.capture_mode = cap.mode
+            if cap.raison:
+                self.log(cap.raison)
             self.ev("ecran", moniteurs=sct.monitors, zone=cfg.get("zone"), anneau=cfg.get("anneau"),
-                    modeles=self.nb_modeles)
-            while not self.stop:
-                rc = self.raccourcis
-                if rc and self.touche_quitter and rac.appui(vk_quit):
-                    self.log("Bye.")
-                    return 0
-                if rc and rac.appui(vk_onoff):
-                    self.basculer()
-                if (rc and rac.appui(vk_det)) or self.demande_detection:
-                    self.demande_detection = False
-                    self.detecter()
-                if self.demande_rechargement:
-                    self.demande_rechargement = False
-                    self.recharger_modeles()
-                if rc and rac.appui(vk_cap) and self.an:
-                    if lettre_capturee is None:
-                        lettre_capturee = self.an.lettre(np.asarray(sct.grab(self.zone)))
-                        rac.synchro([v for _, v in lettres_vk])
-                        self.log(f"Image capturée : appuie sur la lettre affichée ({cfg['touche_capture']} = annuler)")
-                    else:
-                        lettre_capturee = None
-                        self.log("Capture annulée")
-
-                if lettre_capturee is not None:
-                    for nom, v in lettres_vk:
-                        if rac.appui(v):
-                            f = sauver_modele(nom, rogner_modele(lettre_capturee))
+                    modeles=self.nb_modeles, capture=cap.mode, capture_raison=cap.raison)
+            dernier, an_prec, inconnue = None, None, False
+            try:
+                while not self.stop:
+                    rc = self.raccourcis
+                    if rc and self.touche_quitter and rac.appui(vk_quit):
+                        self.log("Bye.")
+                        return 0
+                    if rc and rac.appui(vk_onoff):
+                        self.basculer()
+                    if (rc and rac.appui(vk_det)) or self.demande_detection:
+                        self.demande_detection = False
+                        self.detecter()
+                    if self.demande_rechargement:
+                        self.demande_rechargement = False
+                        self.recharger_modeles()
+                    if rc and rac.appui(vk_cap) and self.an:
+                        if lettre_capturee is None:
+                            lettre_capturee = self.an.lettre(np.asarray(sct.grab(self.zone)))
+                            rac.synchro([v for _, v in lettres_vk])
+                            self.log(f"Image capturée : appuie sur la lettre affichée ({cfg['touche_capture']} = annuler)")
+                        else:
                             lettre_capturee = None
-                            self.recharger_modeles()
-                            self.dec.reset()
-                            self.log(f"Lettre apprise : {nom} ({dossier_modeles()}/{f})")
-                            self.ev("lettre_apprise", lettre=nom, comment="F8")
-                            break
-                    time.sleep(0.005)
-                    continue
+                            self.log("Capture annulée")
 
-                if self.an is None:
-                    self.cercle = False
-                    time.sleep(0.05)
-                    continue
-                if not self.actif:
-                    if not (self.apercu or auto):
-                        self.cercle = False
-                        time.sleep(0.02)
-                        continue
-                    time.sleep(0.03)
-
-                an = self.an
-                frame = np.asarray(sct.grab(self.zone))
-                gris = None
-                if fixe:
-                    barre = an.barre(frame)
-                    if barre and not self.calibre and self._calibrer(frame):
-                        self.calibre, barre = True, an.barre(frame)
-                    nom, vkn, score = (fixe, VK[fixe], 1.0) if barre else (None, None, 0.0)
-                else:
-                    gris = an.lettre(frame)
-                    nom, vkn, score = meilleur_match(pretraiter(gris, cfg), self.modeles)
-                    if not self.calibre and score >= max(seuil, 0.85):
-                        self.calibre = self._calibrer(frame)
-                    barre = an.barre(frame)
-                maintenant = time.perf_counter()
-                reconnu = nom if score >= seuil else None
-                self.image, self.barre, self.nom, self.score = frame, barre, nom, score
-                self.cercle = bool(reconnu or barre)
-                vert_anneau = an.nb_vert >= 0.45 * an.nb_anneau
-                vert_barre = bool(taille_barre and an.nb_vert >= max(8, 0.4 * taille_barre)
-                                  and an.nb_barre < 0.3 * taille_barre)
-                vert = vert_anneau or vert_barre
-                if barre is not None and not vert:
-                    taille_barre = an.nb_barre if not taille_barre else 0.8 * taille_barre + 0.2 * an.nb_barre
-
-                barre_dec = barre if self.dec.attendre and not vert else None
-                decide = self.actif and self.dec.etape(reconnu, barre_dec, maintenant) and not vert
-                self.suivi.image(maintenant, reconnu, score, barre, an, self.dec if self.actif else None, vert)
-                if decide:
-                    titre = titre_premier_plan() if cible else ""
-                    if cible and cible.lower() not in titre.lower():
-                        self.log(f"{nom} PAS envoyé : fenêtre active « {titre[:40]} » (attendu « {cible} »)")
-                        self.suivi.appui(maintenant, nom, score, False, self.dec.info,
-                                         raison=f"fenêtre active « {titre[:60]} »")
-                    else:
-                        appuyer(vkn, appui_ms)
-                        self.nb_appuis += 1
-                        self.suivi.appui(maintenant, nom, score, True, self.dec.info)
-                        info = ""
-                        if barre:
-                            _, debut, fin, rel = barre
-                            info = f" | rouge {rel:+.0f}° dans [{debut:+.0f}°, {fin:+.0f}°]"
-                        self.log(f"-> {nom}  (lettre {score:.2f}{info})")
-
-                if vert:
-                    self.dec.verrou = None
-                if captures and maintenant - t_hist >= 0.025:
-                    hist.append((maintenant, frame))
-                    t_hist = maintenant
-                for c, res in self.suivi.fins:
-                    if res.startswith("réussi"):
-                        self.nb_reussis += 1
-                    elif res.startswith("raté") and captures:
-                        self._capturer(c, hist)
-                self.nb_crochetages = self.suivi.stats["crochetages_ok"]
-                self.nb_rates = self.suivi.stats["crochetages_rates"]
-
-                inconnue = (not fixe and reconnu is None and barre is not None and lettre_plausible(gris))
-                if inconnue:
-                    f = self.collecteur.voir(gris)
-                    if f:
-                        self.log(f"Lettre inconnue vue ({dossier_modeles()}/{A_RENOMMER}/{f}) : "
-                                 f"joue-la toi-même pour me l'apprendre, ou nomme-la dans l'appli")
-                if auto:
-                    if inconnue and not guette_lettres:
-                        rac.synchro([v for _, v in lettres_vk])
-                    guette_lettres = inconnue
-                    if inconnue and candidat is None:
-                        for n, v in lettres_vk:
+                    if lettre_capturee is not None:
+                        for nom, v in lettres_vk:
                             if rac.appui(v):
-                                candidat = (n, gris.copy(), maintenant)
+                                f = sauver_modele(nom, rogner_modele(lettre_capturee))
+                                lettre_capturee = None
+                                self.recharger_modeles()
+                                self.dec.reset()
+                                self.log(f"Lettre apprise : {nom} ({dossier_modeles()}/{f})")
+                                self.ev("lettre_apprise", lettre=nom, comment="F8")
                                 break
-                    if candidat is not None:
-                        n, g, t = candidat
-                        for c, res in self.suivi.fins:
-                            if c["t0"] <= t:
-                                if not res.startswith(("raté", "disparu")):
-                                    sauver_modele(n, rogner_modele(g))
-                                    self.recharger_modeles()
-                                    self.log(f"Lettre apprise toute seule : {n} (tu l'as jouée, check réussi)")
-                                    self.ev("lettre_apprise", lettre=n, comment="jouée à la main")
-                                candidat = None
-                                break
-                        if candidat is not None and maintenant - t > 3.0:
-                            candidat = None
+                        time.sleep(0.005)
+                        continue
 
-                nb_frames += 1
-                n_perf += 1
-                if maintenant - t_fps >= 1.0:
-                    self.fps, nb_frames, t_fps = nb_frames / (maintenant - t_fps), 0, maintenant
-                if maintenant - t_perf >= 10.0:
-                    self.ev("perf", images_par_s=round(n_perf / (maintenant - t_perf), 1), actif=self.actif)
-                    t_perf, n_perf = maintenant, 0
-                if self.debug and maintenant - t_debug >= 0.15:
-                    t_debug = maintenant
-                    b = (f"bleu [{barre[1]:+4.0f},{barre[2]:+4.0f}] rouge {barre[3]:+5.0f}°"
-                         if barre else f"bleu {an.nb_bleu:4d}px rouge {an.nb_rouge:3d}px ({an.raison or '-'})")
-                    v = f"{self.dec.vit:+5.0f}°/s" if self.dec.vit is not None else "   -   "
-                    print(f"  lettre {nom or '-':>5} {score:4.2f} | {b} | vit {v} | vert {an.nb_vert:3d} | "
-                          f"{self.fps:5.0f}/s   ", end="\r", flush=True)
-                if pause_s:
-                    time.sleep(pause_s)
+                    if self.an is None:
+                        self.cercle = False
+                        time.sleep(0.05)
+                        continue
+                    if not self.actif:
+                        if not (self.apercu or auto):
+                            self.cercle = False
+                            time.sleep(0.02)
+                            continue
+                        time.sleep(0.03)
+
+                    an = self.an
+                    if an is not an_prec:
+                        dernier, an_prec = None, an
+                    frame, nouvelle = cap.image(self.zone)
+                    if nouvelle or dernier is None:
+                        nouvelle = True
+                        gris = None
+                        if fixe:
+                            barre = an.barre(frame)
+                            if barre and not self.calibre and self._calibrer(frame):
+                                self.calibre, barre = True, an.barre(frame)
+                            nom, vkn, score = (fixe, VK[fixe], 1.0) if barre else (None, None, 0.0)
+                        else:
+                            gris = an.lettre(frame)
+                            nom, vkn, score = meilleur_match(pretraiter(gris, cfg), self.modeles)
+                            if not self.calibre and score >= max(seuil, 0.85):
+                                self.calibre = self._calibrer(frame)
+                            barre = an.barre(frame)
+                        dernier = (frame, gris, nom, vkn, score, barre)
+                    else:
+                        frame, gris, nom, vkn, score, barre = dernier
+                    maintenant = time.perf_counter()
+                    reconnu = nom if score >= seuil else None
+                    self.image, self.barre, self.nom, self.score = frame, barre, nom, score
+                    self.cercle = bool(reconnu or barre)
+                    vert_anneau = an.nb_vert >= 0.45 * an.nb_anneau
+                    vert_barre = bool(taille_barre and an.nb_vert >= max(8, 0.4 * taille_barre)
+                                      and an.nb_barre < 0.3 * taille_barre)
+                    vert = vert_anneau or vert_barre
+                    if nouvelle and barre is not None and not vert:
+                        taille_barre = an.nb_barre if not taille_barre else 0.8 * taille_barre + 0.2 * an.nb_barre
+
+                    barre_dec = barre if self.dec.attendre and not vert else None
+                    decide = self.actif and self.dec.etape(reconnu, barre_dec, maintenant) and not vert
+                    if nouvelle:
+                        self.suivi.image(maintenant, reconnu, score, barre, an, self.dec if self.actif else None, vert)
+                    fins = self.suivi.fins if nouvelle else []
+                    if decide:
+                        titre = titre_premier_plan() if cible else ""
+                        if cible and cible.lower() not in titre.lower():
+                            self.log(f"{nom} PAS envoyé : fenêtre active « {titre[:40]} » (attendu « {cible} »)")
+                            self.suivi.appui(maintenant, nom, score, False, self.dec.info,
+                                             raison=f"fenêtre active « {titre[:60]} »")
+                        else:
+                            appuyer(vkn, appui_ms)
+                            self.nb_appuis += 1
+                            self.suivi.appui(maintenant, nom, score, True, self.dec.info)
+                            info = ""
+                            if barre:
+                                _, debut, fin, rel = barre
+                                info = f" | rouge {rel:+.0f}° dans [{debut:+.0f}°, {fin:+.0f}°]"
+                            self.log(f"-> {nom}  (lettre {score:.2f}{info})")
+
+                    if vert:
+                        self.dec.verrou = None
+                    if captures and nouvelle and maintenant - t_hist >= 0.025:
+                        hist.append((maintenant, frame))
+                        t_hist = maintenant
+                    for c, res in fins:
+                        if res.startswith("réussi"):
+                            self.nb_reussis += 1
+                        elif res.startswith("raté") and captures:
+                            self._capturer(c, hist)
+                    self.nb_crochetages = self.suivi.stats["crochetages_ok"]
+                    self.nb_rates = self.suivi.stats["crochetages_rates"]
+
+                    if nouvelle:
+                        inconnue = (not fixe and reconnu is None and barre is not None and lettre_plausible(gris))
+                    if inconnue and nouvelle:
+                        f = self.collecteur.voir(gris)
+                        if f:
+                            self.log(f"Lettre inconnue vue ({dossier_modeles()}/{A_RENOMMER}/{f}) : "
+                                     f"joue-la toi-même pour me l'apprendre, ou nomme-la dans l'appli")
+                    if auto:
+                        if inconnue and not guette_lettres:
+                            rac.synchro([v for _, v in lettres_vk])
+                        guette_lettres = inconnue
+                        if inconnue and candidat is None:
+                            for n, v in lettres_vk:
+                                if rac.appui(v):
+                                    candidat = (n, gris.copy(), maintenant)
+                                    break
+                        if candidat is not None:
+                            n, g, t = candidat
+                            for c, res in fins:
+                                if c["t0"] <= t:
+                                    if not res.startswith(("raté", "disparu")):
+                                        sauver_modele(n, rogner_modele(g))
+                                        self.recharger_modeles()
+                                        self.log(f"Lettre apprise toute seule : {n} (tu l'as jouée, check réussi)")
+                                        self.ev("lettre_apprise", lettre=n, comment="jouée à la main")
+                                    candidat = None
+                                    break
+                            if candidat is not None and maintenant - t > 3.0:
+                                candidat = None
+
+                    nb_frames += nouvelle
+                    n_perf += nouvelle
+                    if maintenant - t_fps >= 1.0:
+                        self.fps, nb_frames, t_fps = nb_frames / (maintenant - t_fps), 0, maintenant
+                    if maintenant - t_perf >= 10.0:
+                        self.ev("perf", images_par_s=round(n_perf / (maintenant - t_perf), 1), actif=self.actif)
+                        t_perf, n_perf = maintenant, 0
+                    if self.debug and maintenant - t_debug >= 0.15:
+                        t_debug = maintenant
+                        b = (f"bleu [{barre[1]:+4.0f},{barre[2]:+4.0f}] rouge {barre[3]:+5.0f}°"
+                             if barre else f"bleu {an.nb_bleu:4d}px rouge {an.nb_rouge:3d}px ({an.raison or '-'})")
+                        v = f"{self.dec.vit:+5.0f}°/s" if self.dec.vit is not None else "   -   "
+                        print(f"  lettre {nom or '-':>5} {score:4.2f} | {b} | vit {v} | vert {an.nb_vert:3d} | "
+                              f"{self.fps:5.0f}/s   ", end="\r", flush=True)
+                    if pause_s:
+                        time.sleep(pause_s)
+                    elif not nouvelle:
+                        time.sleep(0.0005)
+            finally:
+                cap.fermer()
         return 0
 
 
