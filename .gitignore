@@ -1,0 +1,10 @@
+# réglages et lettres personnels (créés au premier lancement)
+config.json
+config_*.json
+templates/
+templates_*/
+*.log
+zone_apercu.png
+test_resultat.png
+__pycache__/
+*.pyc
