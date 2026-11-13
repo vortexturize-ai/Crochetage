@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/banniere.png" alt="I Like Baylife" width="100%">
+  <img src="docs/banniere.png" alt="Crochetage" width="100%">
 </p>
 
 <p align="center">
@@ -9,10 +9,10 @@
   <img src="https://img.shields.io/badge/interface-zone%20de%20notification-E32344?style=flat-square" alt="Zone de notification">
 </p>
 
-**I Like Baylife** joue tout seul le skill-check de FiveM. Un cercle apparaît au milieu de l'écran avec
-une lettre au centre, une barre bleue et une aiguille rouge qui tourne. Dès que l'aiguille arrive dans la
-barre, l'appli appuie sur la bonne lettre. Elle enchaîne jusqu'à 6 checks, avec une barre de taille
-différente à chaque fois.
+**Crochetage** joue tout seul le mini-jeu de crochetage de FiveM : portes, véhicules. Un cercle apparaît au
+milieu de l'écran avec une lettre au centre, une barre bleue et une aiguille rouge qui tourne. Dès que
+l'aiguille arrive dans la barre, l'appli appuie sur la bonne lettre. Elle enchaîne les checks (jusqu'à 6,
+barre de taille différente à chaque fois) jusqu'à ce que l'anneau passe au vert : c'est crocheté.
 
 <table>
   <tr>
@@ -30,6 +30,7 @@ différente à chaque fois.
 ## Sommaire
 - [Le moteur en diaporama](#-le-moteur-en-diaporama)
 - [Comment ça marche, en détail](#-comment-ça-marche-en-détail)
+- [Journal et rapport](#-journal-et-rapport)
 - [Installation](#-installation)
 - [Utilisation](#-utilisation)
 - [La simulation](#-la-simulation)
@@ -74,17 +75,17 @@ flowchart LR
     C --> D["⏱️ Prédiction<br/>vitesse × latence"]
     D -->|"aiguille prévue<br/>dans la barre"| E["⌨️ Appui<br/>SendInput"]
     D -->|"pas encore"| A
-    E --> F{"🟢 barre verte ?"}
+    E --> F{"check suivant ?"}
     F -->|"oui : réussi"| A
-    F -->|"non"| A
+    F -->|"anneau vert"| G["🔓 Crocheté"]
+    F -->|"cercle disparu"| H["❌ Raté"]
 ```
 
-Tout se passe dans [`autotouche.py`](autotouche.py), dans la classe `Moteur`. La boucle tourne environ
-150 fois par seconde : capture, lecture, décision, et appui si c'est le moment.
+Tout se passe dans [`autotouche.py`](autotouche.py), dans la classe `Moteur`. La boucle tourne en continu :
+capture, lecture, décision, et appui si c'est le moment.
 
 ### 1. Trouver le cercle (touche F7)
-Pas besoin de régler une zone à la souris. Pendant qu'un skill-check tourne, **F7** lance
-`detecter_cercle_anime()` :
+Pas besoin de régler une zone à la souris. Pendant qu'un crochetage tourne, **F7** lance la détection :
 1. pendant ~1 s, le bot ne garde que le rouge **qui vient d'apparaître** (l'aiguille qui bouge) ;
 2. à chaque image, l'aiguille devient un petit **trait qui pointe vers le centre** (axe principal du bloc
    de pixels, par ACP) ;
@@ -105,11 +106,13 @@ Les modèles sont un peu plus petits que le carré lu, donc une lettre décalée
 quand même reconnue.
 
 ### 3. La barre et l'aiguille
-- Masques de couleur **HSV** (bleu = barre, rouge = aiguille, vert = réussi), **seulement sur l'anneau** :
-  le décor visible au milieu du cercle (l'anneau est transparent) ne compte pas.
+- Masques de couleur **HSV** (bleu = barre, rouge = aiguille, vert = crocheté), **seulement sur l'anneau** :
+  le décor visible au milieu du cercle ne compte pas.
 - Chaque pixel devient un **angle**, rangé par cases de 2°.
-- **Barre** = le bloc bleu le plus *épais* (le plus de pixels par case) ; **aiguille** = le bloc rouge le
-  plus épais. Un liseré de décor au bord de l'anneau ne fait que 1 ou 2 pixels de large, donc il est écarté.
+- **Barre** = le bloc bleu le plus *épais* ; **aiguille** = le bloc rouge le plus épais. Un liseré de
+  décor au bord de l'anneau ne fait que 1 ou 2 pixels de large : il est écarté, même quand il couvre un
+  grand arc (feu arrière ou gyrophare qui passe juste derrière l'aiguille). Une barre doit remplir au
+  moins 35 % de l'épaisseur de l'anneau.
 
 ### 4. Prévoir le bon moment
 La vitesse de l'aiguille est mesurée en direct, dans les deux sens de rotation. Le bot calcule :
@@ -127,21 +130,63 @@ image de plus.
   frappe, et le clavier AZERTY est géré.
 - **Sécurité** : rien n'est envoyé si la fenêtre au premier plan n'est pas « FiveM ». Le bot ne tape
   jamais de lettre dans une autre appli.
-- Un **verrou** garantit un seul appui par check. Il se libère quand la barre devient verte, que la
-  lettre change, que la barre bouge ou que l'aiguille repart de zéro.
+- Un **verrou** garantit un seul appui par check. Il se libère quand le check suivant apparaît (nouvelle
+  lettre, barre déplacée, aiguille repartie de zéro).
 
-### 6. Apprendre les lettres
-- **Tout seul** : sur une lettre inconnue, tu la joues toi-même. Si la barre devient verte, le bot
-  enregistre l'image comme modèle.
+### 6. Savoir si c'est réussi
+Dans le jeu, l'anneau ne passe au vert (`#2A823C`) **qu'à la fin**, quand l'objet est crocheté. Le bot
+déduit donc l'issue tout seul :
+
+| Ce qu'il voit après un appui | Ce qu'il en conclut |
+|---|---|
+| le check suivant apparaît | check réussi |
+| l'anneau passe au vert | crocheté (porte, véhicule ouvert) |
+| le cercle disparaît sans vert | raté |
+
+Pendant que l'anneau est vert, le bot n'appuie jamais.
+
+### 7. Apprendre les lettres
+- **Tout seul** : sur une lettre inconnue, tu la joues toi-même. Si le check suivant apparaît (ou si
+  l'anneau passe au vert), le bot enregistre l'image comme modèle.
 - Ou **F8** puis la lettre, ou bien en tapant la lettre dans l'appli (« à nommer »).
 
 ### Résultats des tests
 | Test | Résultat |
 |---|---|
-| Simulation, bot complet (vraie capture d'écran, décor piège qui bouge) | **46 / 46** checks, **10 / 10** séquences |
+| Simulation de vol de véhicule et de porte (trafic, gyrophares, pluie), 4 min | **47 / 47** crochetages, **221 / 221** checks, 0 appui en trop |
+| Où tombe l'appui dans la barre (cible 35 %) | **34 % ± 3 %** |
+| Le bot sait-il s'il a réussi ? | d'accord avec la vérité sur **47 / 47** crochetages |
 | Détection du cercle sur 200 scènes générées (nuit, voitures bleues/rouges collées) | **192 / 200**, centre à < 1 px |
 | Vraie capture du jeu | cercle, barre et aiguille trouvés au pixel près |
-| Vraies touches clavier dans la simulation | **24 / 24** |
+
+---
+
+## 📜 Journal et rapport
+
+Tout est noté, de A à Z, dans le dossier `logs/` (un événement JSON par ligne) :
+
+| Fichier | Contenu |
+|---|---|
+| `moteur_<date>.jsonl` | en jeu : chaque crochetage, chaque check, chaque appui (position prévue dans la barre, vitesse, âge de l'image), chaque image où la barre a été perdue et pourquoi |
+| `sim_verite_<date>.jsonl` | en simulation : ce qui s'est vraiment passé, au degré près (où était l'aiguille quand la touche est arrivée) |
+| `sim_moteur_<date>.jsonl` | en simulation : ce que le bot a vu et décidé |
+| `captures/` | les images vues par le bot pendant chaque check raté |
+| `rapport_<date>.md` | le rapport d'analyse |
+
+```bash
+python rapport.py          # dernière session (simulation ou jeu)
+python rapport.py --jeu    # dernière session en jeu
+```
+
+Le rapport donne les résultats, la précision (histogramme de la position des appuis dans la barre), le
+**calage** entre ce que le bot avait prévu et ce qui s'est passé, les pertes de détection, le détail de
+chaque raté, et **les réglages à changer** :
+
+```
+[rapport] Crochetages 47/47 · checks 221/221
+[rapport] Appui à 34 % de la barre en moyenne (± 3 %)
+[rapport] Anticipation : la touche arrive en moyenne 4.3 ms plus tôt que prévu → latence_ms 8 → 4.
+```
 
 ---
 
@@ -151,56 +196,78 @@ image de plus.
 3. Double-clic sur **`0_installer.bat`** (installe mss, OpenCV, numpy, pystray, Pillow).
 
 ## 🎮 Utilisation
-1. Double-clic sur **`1_Lancer I Like Baylife.bat`** : le logo apparaît près de l'horloge (sinon,
-   regarde dans la flèche `^`). Il est rouge quand le bot est actif, gris en pause.
+1. Double-clic sur **`1_Lancer Crochetage.bat`** : le logo apparaît près de l'horloge (sinon, regarde
+   dans la flèche `^`). Il est rouge quand le bot est actif, gris en pause.
 2. Mets le jeu en **fenêtré sans bordure** (en plein écran exclusif, la capture d'écran sort noire).
-3. Lance un skill-check, puis appuie sur **F7** pendant que l'aiguille tourne : « Cercle trouvé ».
+3. Lance un crochetage, puis appuie sur **F7** pendant que l'aiguille tourne : « Cercle trouvé ».
 4. Appuie sur **F6** pour activer ou mettre en pause.
 
 | Touche | Action |
 |---|---|
 | **F6** | activer / pause |
-| **F7** | trouver le cercle (pendant un skill-check) |
+| **F7** | trouver le cercle (pendant un crochetage) |
 | **F8** | apprendre la lettre affichée (puis appuie sur la lettre) |
 
-Clic sur le logo : ouvre l'appli (aperçu en direct de ce que voit le bot, état, réglages).
+Clic sur le logo : ouvre l'appli (aperçu en direct de ce que voit le bot, crochetages réussis, réglages).
 Clic droit : Activer, Détecter, Simulation, Quitter.
 
 ## 🧪 La simulation
-**`2_Simulation.bat`** ouvre un skill-check d'entraînement en **plein écran sans bordure**, copié sur le
-vrai (mêmes tailles et couleurs) : 3 à 6 checks d'affilée, barre de taille variable qui devient verte,
-décor qui bouge derrière. Le bot de la simulation trouve le cercle et apprend les lettres tout seul.
-**F6** = bot ON/OFF (pour jouer toi-même), **Échap** = quitter.
+**`2_Simulation.bat`** ouvre un crochetage d'entraînement en **plein écran**, façon serveur RP : de nuit,
+sous la pluie, tu voles une berline garée ou tu crochètes une porte d'entrée. Le mini-jeu est copié sur
+le vrai (mêmes tailles et couleurs) : 3 à 6 checks d'affilée, barre de taille variable, anneau vert à la
+fin. Autour : trafic dont les feux rouges passent derrière le cercle, patrouilles de police avec
+gyrophares rouge / bleu, alarme du véhicule sur un raté, HUD de serveur RP (mini-carte, argent, jauges,
+alerte police).
 
-<p align="center"><img src="docs/simulation.png" alt="La simulation" width="100%"></p>
+<p align="center"><img src="docs/simulation.png" alt="La simulation : vol de véhicule" width="100%"></p>
+
+| | |
+|---|---|
+| <img src="docs/simulation_porte.png" alt="Crochetage d'une porte" width="100%"> | <img src="docs/simulation_crochete.png" alt="Anneau vert : véhicule déverrouillé" width="100%"> |
+| <sub>Crochetage d'une porte</sub> | <sub>Fin du cycle : l'anneau passe au vert</sub> |
+
+Le bot de la simulation trouve le cercle et apprend les lettres tout seul. **F6** = bot ON/OFF (pour
+jouer toi-même), **Échap** = quitter ; le rapport est généré à la fermeture.
+
+```bash
+python simulation.py --scene porte       # seulement des portes (vehicule / porte / mix)
+python simulation.py --vitesse 1.5       # aiguille 1.5x plus rapide
+python simulation.py --sans-bot          # pour jouer toi-même
+python simulation.py --duree 300         # s'arrête tout seul après 5 min
+```
 
 ## 🔧 Réglages et dépannage
 <img src="docs/appli_reglages.png" alt="Réglages" width="260" align="right">
 
 | Réglage (⚙) | Quand y toucher |
 |---|---|
-| **Anticipation** | Appuie trop **tard** dans la barre → monte. Trop **tôt** → baisse. |
+| **Anticipation** | Appuie trop **tard** dans la barre → monte. Trop **tôt** → baisse. Le rapport donne la bonne valeur. |
 | **Où viser** | 0 % = dès l'entrée de la barre, 50 % = au milieu. |
 | **Reconnaissance** | Mauvaise lettre → monte. Lettre pas reconnue → baisse. |
 | **Fenêtre du jeu** | Texte que doit contenir le titre de la fenêtre (par défaut « FiveM »). |
 | **Démarrer avec Windows** | Lance l'appli à l'ouverture de session. |
 
+Dans `config.json` : `journal` (journal détaillé, oui par défaut) et `captures_echec` (images des ratés,
+oui par défaut).
+
 - **« Cercle pas trouvé »** : refais F7 pendant que l'aiguille tourne.
 - **« PAS envoyé : fenêtre active … »** : le jeu n'était pas devant, ou son titre ne contient pas
   « FiveM ». Corrige « Fenêtre du jeu ».
 - **Touche ignorée par le jeu** : lance l'appli en administrateur.
-- Journal complet : `ilikebaylife.log`.
+- **Des ratés ?** `python rapport.py --jeu`, puis regarde les images dans `logs/captures/`.
 
 <br clear="right">
 
 ## 📁 Fichiers du projet
 | Fichier | Rôle |
 |---|---|
-| [`ILikeBaylife.pyw`](ILikeBaylife.pyw) | l'appli (zone de notification + fenêtre style Mullvad) |
-| [`autotouche.py`](autotouche.py) | le moteur : détection, analyse, décision, clavier (utilisable aussi en ligne de commande) |
+| [`Crochetage.pyw`](Crochetage.pyw) | l'appli (zone de notification + fenêtre style Mullvad) |
+| [`autotouche.py`](autotouche.py) | le moteur : détection, analyse, décision, clavier, journal (utilisable aussi en ligne de commande) |
 | [`simulation.py`](simulation.py) | la simulation d'entraînement |
+| [`scene.py`](scene.py) | les décors de la simulation (rue de nuit, véhicule, porte, mini-carte) |
+| [`rapport.py`](rapport.py) | le rapport d'analyse des journaux |
 | [`logo.png`](logo.png) | le logo (icône de l'appli) |
-| `config.json`, `templates/` | créés au premier lancement : tes réglages et tes lettres apprises (non versionnés) |
+| `config.json`, `templates/`, `logs/` | créés au premier lancement : tes réglages, tes lettres apprises, tes journaux (non versionnés) |
 
 En ligne de commande : `python autotouche.py --detecter`, `--debug`, ou `--test capture.png` pour tester
 la détection sur une capture d'écran.

@@ -1,13 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-I Like Baylife - l'appli.
-
-Tourne en fond avec une icône près de l'horloge (zone de notification).
-Clic sur l'icône -> petite fenêtre au-dessus de la barre des tâches (style Mullvad VPN) :
-aperçu en direct du cercle, état, bouton Activer, réglages.
-
-Lancer : double-clic sur « 1_Lancer I Like Baylife.bat » (ou sur ce fichier).
-"""
 import ctypes
 import ctypes.wintypes as wt
 import math
@@ -21,7 +11,7 @@ import traceback
 import tkinter as tk
 from collections import deque
 
-try:  # vrais pixels (même zoom Windows 125/150 %)
+try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)
 except Exception:
     pass
@@ -30,28 +20,27 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE)
 sys.path.insert(0, BASE)
 
-# une seule appli à la fois
-_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\ILikeBaylife_appli")
+_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\Crochetage_appli")
 if ctypes.windll.kernel32.GetLastError() == 183:
-    ctypes.windll.user32.MessageBoxW(None, "I Like Baylife tourne déjà : clique sur son icône près de l'horloge.",
-                                     "I Like Baylife", 0x40)
+    ctypes.windll.user32.MessageBoxW(None, "Crochetage tourne déjà : clique sur son icône près de l'horloge.",
+                                     "Crochetage", 0x40)
     sys.exit(0)
 
-import numpy as np                      # noqa: E402
-import pystray                          # noqa: E402
-from PIL import Image, ImageDraw, ImageTk  # noqa: E402
+import numpy as np
+import pystray
+from PIL import Image, ImageDraw, ImageTk
 
-import autotouche as at                 # noqa: E402
+import autotouche as at
 
-# ------------------------------------------------------------------ thème : rouge du logo + noir
 ROUGE, ROUGE_FONCE, ROUGE_CLAIR = "#E32344", "#B8162F", "#FF5872"
 FOND, NOIR, CARTE, CARTE2, BORD = "#0E0E11", "#08080A", "#17171C", "#212128", "#2E2E37"
 TEXTE, TEXTE2, TEXTE3 = "#F4F4F6", "#A2A2AE", "#6C6C78"
 POLICE = "Segoe UI"
 W, H = 340, 620
 
-LOG = os.path.join(BASE, "ilikebaylife.log")
+LOG = os.path.join(BASE, "crochetage.log")
 RUN_CLE = r"Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_NOM, RUN_ANCIEN = "Crochetage", "ILikeBaylife"
 
 
 def pythonw():
@@ -64,28 +53,37 @@ def pythonw():
 
 
 def demarrage_windows(etat=None):
-    """Lit (etat=None) ou change le lancement automatique avec Windows."""
     import winreg
+
+    def existe(k, nom):
+        try:
+            winreg.QueryValueEx(k, nom)
+            return True
+        except FileNotFoundError:
+            return False
+
+    def supprimer(k, nom):
+        try:
+            winreg.DeleteValue(k, nom)
+        except FileNotFoundError:
+            pass
+
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_CLE, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as k:
         if etat is None:
-            try:
-                winreg.QueryValueEx(k, "ILikeBaylife")
-                return True
-            except FileNotFoundError:
-                return False
+            if existe(k, RUN_ANCIEN):
+                supprimer(k, RUN_ANCIEN)
+                etat = True
+            else:
+                return existe(k, RUN_NOM)
         if etat:
-            winreg.SetValueEx(k, "ILikeBaylife", 0, winreg.REG_SZ,
-                              f'"{pythonw()}" "{os.path.join(BASE, "ILikeBaylife.pyw")}"')
+            winreg.SetValueEx(k, RUN_NOM, 0, winreg.REG_SZ,
+                              f'"{pythonw()}" "{os.path.join(BASE, "Crochetage.pyw")}"')
         else:
-            try:
-                winreg.DeleteValue(k, "ILikeBaylife")
-            except FileNotFoundError:
-                pass
+            supprimer(k, RUN_NOM)
         return etat
 
 
 def charger_logo():
-    """logo.png recadré sur le dessin (sans le halo) et mis au carré. None si absent."""
     try:
         im = Image.open(os.path.join(BASE, "logo.png")).convert("RGBA")
     except Exception:
@@ -96,7 +94,6 @@ def charger_logo():
     s = max(im.size)
     carre = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     carre.paste(im, ((s - im.width) // 2, (s - im.height) // 2))
-    # on enlève le halo clair autour (illisible en petit)
     a = np.array(carre)
     a[..., 3] = np.where(a[..., 3] > 90, a[..., 3], 0)
     return Image.fromarray(a)
@@ -106,7 +103,6 @@ LOGO = charger_logo()
 
 
 def icone(actif, taille=64):
-    """Icône près de l'horloge : le logo (en couleur = actif, en gris = en pause)."""
     if LOGO is None:
         return _icone_dessinee(actif, taille)
     im = LOGO.resize((taille, taille), Image.LANCZOS)
@@ -119,7 +115,6 @@ def icone(actif, taille=64):
 
 
 def badge(taille):
-    """Le logo posé sur un carré noir arrondi (pour l'en-tête rouge, où le logo rouge serait invisible)."""
     s = taille * 4
     im = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     ImageDraw.Draw(im).rounded_rectangle([0, 0, s - 1, s - 1], radius=int(s * 0.26), fill=(10, 10, 12, 255))
@@ -130,7 +125,6 @@ def badge(taille):
 
 
 def _icone_dessinee(actif, taille=64):
-    """Icône de secours (si logo.png manque) : carré noir, anneau, barre rouge, aiguille blanche."""
     s = taille * 4
     im = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
@@ -154,9 +148,8 @@ def rrect(c, x1, y1, x2, y2, r, **kw):
     return c.create_polygon(pts, smooth=True, **kw)
 
 
-# ------------------------------------------------------------------ petits widgets dessinés
 class Bouton(tk.Canvas):
-    STYLES = {  # fond, fond survolé, contour, texte
+    STYLES = {
         "primaire": (ROUGE, ROUGE_CLAIR, ROUGE, "white"),
         "contour": (CARTE2, "#2A1218", ROUGE, ROUGE_CLAIR),
         "secondaire": (CARTE2, BORD, BORD, TEXTE),
@@ -241,7 +234,6 @@ class Curseur(tk.Canvas):
         self.itemconfigure(self.txt, text=self.fmt(self.valeur))
 
 
-# ------------------------------------------------------------------ l'appli
 class App:
     def __init__(self):
         self.root = tk.Tk()
@@ -250,7 +242,7 @@ class App:
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         self.root.configure(bg=FOND)
-        self.root.title("I Like Baylife")
+        self.root.title("Crochetage")
         self.q = queue.Queue()
         self.journal = deque(maxlen=200)
         self.visible, self.t_montre, self.vue = False, 0.0, None
@@ -262,7 +254,7 @@ class App:
         neuf = not os.path.exists(at.CONFIG_PATH)
         self.cfg = at.charger_config()
         if neuf:
-            self.cfg["fenetre_cible"] = "FiveM"   # sécurité : n'appuie que dans le jeu
+            self.cfg["fenetre_cible"] = "FiveM"
             at.sauver_config(self.cfg)
         self.version_cfg = -1
 
@@ -280,7 +272,6 @@ class App:
     def police(self, taille, gras=False):
         return (POLICE, -self.px(taille), "bold") if gras else (POLICE, -self.px(taille))
 
-    # -------------------------------------------------------------- journal
     def _ouvrir_log(self):
         try:
             if os.path.exists(LOG) and os.path.getsize(LOG) > 1_000_000:
@@ -296,7 +287,6 @@ class App:
         except OSError:
             pass
 
-    # -------------------------------------------------------------- moteur
     def demarrer_moteur(self, actif=None):
         ancien = self.moteur
         if ancien:
@@ -306,6 +296,7 @@ class App:
         m = at.Moteur(self.cfg, log=self.noter, actif=bool(actif), touche_quitter=False)
         if ancien:
             m.nb_appuis, m.nb_reussis = ancien.nb_appuis, ancien.nb_reussis
+            m.nb_crochetages, m.nb_rates = ancien.nb_crochetages, ancien.nb_rates
             m.raccourcis = ancien.raccourcis
         self.moteur = m
 
@@ -326,11 +317,10 @@ class App:
         at.sauver_config(self.cfg)
         self.demarrer_moteur()
 
-    # -------------------------------------------------------------- icône près de l'horloge
     def creer_icone(self):
         self.img_on, self.img_off = icone(True), icone(False)
         menu = pystray.Menu(
-            pystray.MenuItem("Ouvrir I Like Baylife", lambda: self.q.put("ouvrir"), default=True),
+            pystray.MenuItem("Ouvrir Crochetage", lambda: self.q.put("ouvrir"), default=True),
             pystray.MenuItem(lambda it: "Mettre en pause  (F6)" if self.moteur.actif else "Activer  (F6)",
                              lambda: self.q.put("basculer")),
             pystray.MenuItem("Détecter le cercle  (F7)", lambda: self.q.put("detecter")),
@@ -338,7 +328,7 @@ class App:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Quitter", lambda: self.q.put("quitter")),
         )
-        self.tray = pystray.Icon("ILikeBaylife", self.img_off, "I Like Baylife - en pause", menu)
+        self.tray = pystray.Icon("Crochetage", self.img_off, "Crochetage - en pause", menu)
         self.etat_icone = False
         threading.Thread(target=self.tray.run, daemon=True).start()
 
@@ -348,15 +338,14 @@ class App:
             self.etat_icone = actif
             try:
                 self.tray.icon = self.img_on if actif else self.img_off
-                self.tray.title = "I Like Baylife - ACTIF" if actif else "I Like Baylife - en pause"
+                self.tray.title = "Crochetage - ACTIF" if actif else "Crochetage - en pause"
                 self.tray.update_menu()
             except Exception:
                 pass
 
-    # -------------------------------------------------------------- fenêtre
     def placer(self):
         r = wt.RECT()
-        ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(r), 0)  # zone de travail
+        ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(r), 0)
         w, h = self.px(W), self.px(H)
         self.root.geometry(f"{w}x{h}+{r.right - w - self.px(12)}+{r.bottom - h - self.px(12)}")
 
@@ -368,7 +357,7 @@ class App:
         self.moteur.apercu = True
         try:
             hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
-            pref = ctypes.c_int(2)  # coins arrondis (Windows 11)
+            pref = ctypes.c_int(2)
             ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(pref), 4)
             ctypes.windll.user32.SetForegroundWindow(hwnd)
         except Exception:
@@ -399,17 +388,15 @@ class App:
             self.sim.terminate()
         self.root.destroy()
 
-    # -------------------------------------------------------------- construction
     def construire(self):
         px = self.px
-        # en-tête rouge (comme Mullvad)
         self.entete = tk.Canvas(self.root, width=px(W), height=px(60), bg=ROUGE, highlightthickness=0)
         self.entete.pack(fill="x")
         self.logo = ImageTk.PhotoImage(badge(px(38)))
         self.it_logo = self.entete.create_image(px(16), px(30), image=self.logo, anchor="w")
         self.it_retour = self.entete.create_text(px(18), px(29), text="‹", fill="white", anchor="w",
                                                  font=self.police(30, True), state="hidden")
-        self.it_titre = self.entete.create_text(px(60), px(30), text="I LIKE BAYLIFE", fill="white", anchor="w",
+        self.it_titre = self.entete.create_text(px(60), px(30), text="CROCHETAGE", fill="white", anchor="w",
                                                 font=self.police(19, True))
         self.it_reglages = self.entete.create_text(px(W - 50), px(30), text="⚙", fill="white",
                                                    font=self.police(21))
@@ -421,7 +408,6 @@ class App:
             self.entete.tag_bind(it, "<ButtonRelease-1>", lambda e, a=act: a())
             self.entete.tag_bind(it, "<Enter>", lambda e: self.entete.configure(cursor="hand2"))
             self.entete.tag_bind(it, "<Leave>", lambda e: self.entete.configure(cursor=""))
-        # sous-titre
         self.sous = tk.Canvas(self.root, width=px(W), height=px(26), bg=ROUGE_FONCE, highlightthickness=0)
         self.sous.pack(fill="x")
         self.it_sous_g = self.sous.create_text(px(16), px(13), anchor="w", fill="#FFE3E8", font=self.police(11, True))
@@ -435,7 +421,6 @@ class App:
     def construire_accueil(self):
         px = self.px
         v = tk.Frame(self.corps, bg=FOND)
-        # aperçu en direct (la « carte » de Mullvad)
         hA = px(250)
         self.cv = tk.Canvas(v, width=px(W), height=hA, bg=NOIR, highlightthickness=0)
         self.cv.pack(fill="x")
@@ -455,7 +440,6 @@ class App:
         self.it_lettre = self.cv.create_text(px(12), hA - px(8), anchor="sw", fill=TEXTE2, font=self.police(11, True))
         self.it_fps = self.cv.create_text(px(W - 12), hA - px(8), anchor="se", fill=TEXTE3, font=self.police(10))
 
-        # carte du bas
         lc, hc = px(W - 24), px(256)
         carte = tk.Canvas(v, width=lc, height=hc, bg=FOND, highlightthickness=0)
         carte.pack(pady=(px(10), 0))
@@ -540,7 +524,7 @@ class App:
                style="secondaire", bg=FOND, taille=12).grid(row=0, column=0, padx=(0, px(8)))
         Bouton(bas, "Simulation", self.simulation, lb, px(36), self.f, style="secondaire", bg=FOND,
                taille=12).grid(row=0, column=1)
-        Bouton(bas, "Quitter I Like Baylife", self.quitter, lc, px(36), self.f, style="danger", bg=FOND,
+        Bouton(bas, "Quitter Crochetage", self.quitter, lc, px(36), self.f, style="danger", bg=FOND,
                taille=12).grid(row=1, column=0, columnspan=2, pady=(px(6), 0))
         return v
 
@@ -595,18 +579,17 @@ class App:
         self.entete.itemconfigure(self.it_logo, state="normal" if accueil else "hidden")
         self.entete.itemconfigure(self.it_retour, state="hidden" if accueil else "normal")
         self.entete.itemconfigure(self.it_reglages, state="normal" if accueil else "hidden")
-        self.entete.itemconfigure(self.it_titre, text={"accueil": "I LIKE BAYLIFE", "reglages": "RÉGLAGES",
+        self.entete.itemconfigure(self.it_titre, text={"accueil": "CROCHETAGE", "reglages": "RÉGLAGES",
                                                         "lettres": "LETTRES"}[nom])
         self.entete.coords(self.it_titre, self.px(60 if accueil else 44), self.px(30))
 
-    # -------------------------------------------------------------- actions
     def detecter(self):
         self.moteur.demande_detection = True
 
     def simulation(self):
         if self.sim and self.sim.poll() is None:
             return
-        self.moteur.raccourcis = False   # F6 de la simulation ne doit pas basculer ce bot-ci
+        self.moteur.raccourcis = False
         self.sim = subprocess.Popen([pythonw(), os.path.join(BASE, "simulation.py")], cwd=BASE)
         self.cacher()
 
@@ -616,7 +599,6 @@ class App:
         except Exception as e:
             self.noter(f"[appli] démarrage avec Windows impossible : {e}")
 
-    # -------------------------------------------------------------- boucle d'affichage
     def boucle(self):
         try:
             while not self.q.empty():
@@ -649,7 +631,6 @@ class App:
         self._nbi = nb_inconnues
         self.sous.itemconfigure(self.it_sous_g, text=(f"Zone : {z['width']} px   ·   Lettres : {m.nb_modeles}"
                                                       if z else "Zone : pas encore trouvée"))
-        # statut
         actif = m.actif
         self.carte.itemconfigure(self.it_statut, text="ACTIF" if actif else "EN PAUSE",
                                  fill=ROUGE_CLAIR if actif else TEXTE)
@@ -671,7 +652,7 @@ class App:
         else:
             info = "En attente d'un skill-check"
         self.carte.itemconfigure(self.it_info, text=info)
-        self.carte.itemconfigure(self.it_stats, text=f"Réussis {m.nb_reussis}   ·   Appuis {m.nb_appuis}")
+        self.carte.itemconfigure(self.it_stats, text=f"Crochetés {m.nb_crochetages}   ·   Checks {m.nb_reussis}/{m.nb_appuis}")
         dernier = (m.dernier or (self.journal[-1] if self.journal else "")).split("] ", 1)[-1]
         self.carte.itemconfigure(self.it_journal, text=dernier if len(dernier) <= 46 else dernier[:45] + "…")
         self.carte.itemconfigure(self.it_lettres, text=f"{nb_inconnues} à nommer ›" if nb_inconnues else "")

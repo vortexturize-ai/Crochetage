@@ -1,35 +1,13 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-I Like Baylife - le moteur du skill-check automatique (+ ligne de commande).
-
-Cercle au milieu de l'écran : lettre au centre, barre bleue sur l'anneau, aiguille
-rouge qui tourne. Quand l'aiguille arrive dans la barre bleue, le bot appuie sur la
-lettre affichée. Gère les checks enchaînés (jusqu'à 6, barre de taille variable,
-barre qui passe au vert quand c'est réussi).
-
-L'appli ILikeBaylife.pyw fait tout ça avec une interface. En ligne de commande :
-    python autotouche.py --detecter         trouve le cercle tout seul (lance un skill-check dans les 5 s)
-    python autotouche.py --zone             ou encadre le cercle à la souris
-    python autotouche.py                    lancer
-    python autotouche.py --debug            lancer + infos en direct
-    python autotouche.py --test image.png   tester la détection sur une capture d'écran
-
-Raccourcis pendant que ça tourne :
-    F6  activer / pause
-    F7  détecter le cercle (pendant qu'un skill-check est affiché)
-    F8  apprendre une lettre : F8 pendant que le cercle est affiché, puis la lettre
-    F10 quitter (ligne de commande seulement)
-Apprentissage auto : sur une lettre inconnue, joue-la toi-même ; si la barre passe
-au vert, le bot retient la lettre.
-"""
 import argparse
 import ctypes
 import ctypes.wintypes as wt
 import json
 import os
+import platform
 import sys
+import threading
 import time
+from collections import Counter, deque
 from datetime import datetime
 
 import cv2
@@ -38,6 +16,7 @@ import numpy as np
 
 MSS = getattr(mss, "MSS", None) or mss.mss
 
+VERSION = "2.0"
 BASE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE, "config.json")
 TEMPLATES_DIR = os.path.join(BASE, "templates")
@@ -45,7 +24,6 @@ A_RENOMMER = "a_renommer"
 
 
 def set_profil(nom):
-    """Profil séparé (ex : 'sim') -> config_<nom>.json + templates_<nom>/ (ne touche pas au profil du jeu)."""
     global CONFIG_PATH, TEMPLATES_DIR
     if nom:
         CONFIG_PATH = os.path.join(BASE, f"config_{nom}.json")
@@ -57,36 +35,35 @@ def dossier_modeles():
 
 
 DEFAULT_CONFIG = {
-    "zone": None,                 # {"left", "top", "width", "height"} - carré autour du cercle
-    "attendre_barre": True,       # True = appuie quand le rouge est dans le bleu ; False = dès que la lettre apparaît
-    "touche_fixe": None,          # ex "E" : ne lit pas la lettre, appuie toujours sur celle-ci
-    "seuil": 0.75,                # ressemblance mini (0..1) pour reconnaître une lettre
-    "appui_ms": 20,               # durée de maintien de la touche
-    "latence_ms": 25,             # anticipation : appuie un peu avant pour compenser le retard écran -> jeu
-    "cible": 0.35,                # où viser dans la barre : 0 = dès l'entrée, 0.5 = au milieu
-    "marge_deg": 3,               # jamais à moins de X degrés du bord de la barre
-    "absence_ms": 40,             # le cercle doit disparaître X ms avant de réarmer
-    "taille_lettre": 0.20,        # carré central lu pour la lettre (fraction de la zone) : doit rester DANS le carré sombre
-    "anneau": [0.55, 1.05],       # rayons mini/maxi (fraction du rayon de la zone) où chercher barre et aiguille
-    "anneau_auto": True,          # recale l'anneau sur le cercle noir (inutile après une détection F7)
-    "fenetre_cible": None,        # ex "FiveM" : n'appuie que si la fenêtre au premier plan contient ce texte
-    "apprentissage_auto": True,   # lettre inconnue jouée par toi + barre verte = lettre apprise
+    "zone": None,
+    "attendre_barre": True,
+    "touche_fixe": None,
+    "seuil": 0.75,
+    "appui_ms": 20,
+    "latence_ms": 25,
+    "cible": 0.35,
+    "marge_deg": 3,
+    "absence_ms": 40,
+    "taille_lettre": 0.20,
+    "anneau": [0.55, 1.05],
+    "anneau_auto": True,
+    "fenetre_cible": None,
+    "apprentissage_auto": True,
+    "journal": True,
+    "captures_echec": True,
     "bleu_hsv": [[90, 100, 100], [130, 255, 255]],
     "rouge_hsv": [[0, 100, 90], [10, 255, 255], [168, 100, 90], [179, 255, 255]],
     "vert_hsv": [[45, 90, 90], [85, 255, 255]],
     "min_pixels_bleu": 20,
     "min_pixels_rouge": 5,
-    "binaire": None,              # None = lettre en niveaux de gris ; 0-255 = noir/blanc avec ce seuil
-    "pause_boucle_ms": 0,         # 0 = vitesse max ; 1 = moins de CPU
+    "binaire": None,
+    "pause_boucle_ms": 0,
     "touche_on_off": "F6",
     "touche_detecter": "F7",
     "touche_capture": "F8",
     "touche_quitter": "F10",
 }
 
-# --------------------------------------------------------------------------
-# Clavier (Windows SendInput en scancode -> marche dans les jeux)
-# --------------------------------------------------------------------------
 VK = {chr(c): c for c in range(ord("A"), ord("Z") + 1)}
 VK.update({str(d): ord(str(d)) for d in range(10)})
 VK.update({
@@ -155,7 +132,7 @@ def _send(scan, flags):
 
 
 def appuyer(vk, duree_ms):
-    scan = user32.MapVirtualKeyW(vk, 0)  # selon la disposition clavier active (AZERTY ok)
+    scan = user32.MapVirtualKeyW(vk, 0)
     ext = KEYEVENTF_EXTENDEDKEY if vk in EXTENDED_VK else 0
     _send(scan, ext)
     if duree_ms > 0:
@@ -164,7 +141,6 @@ def appuyer(vk, duree_ms):
 
 
 class Raccourcis:
-    """Front montant d'une touche via GetAsyncKeyState."""
 
     def __init__(self):
         self.etat = {}
@@ -180,9 +156,6 @@ class Raccourcis:
             self.etat[vk] = bool(user32.GetAsyncKeyState(vk) & 0x8000)
 
 
-# --------------------------------------------------------------------------
-# Config / images
-# --------------------------------------------------------------------------
 def charger_config():
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))
     if os.path.exists(CONFIG_PATH):
@@ -197,7 +170,6 @@ def sauver_config(cfg):
 
 
 def lire_image(chemin, flag=cv2.IMREAD_GRAYSCALE):
-    # imdecode : supporte les chemins avec accents (Bureau, Téléchargements...)
     return cv2.imdecode(np.fromfile(chemin, dtype=np.uint8), flag)
 
 
@@ -216,20 +188,16 @@ def pretraiter(gris, cfg):
 
 
 def rogner_modele(gris):
-    """Garde le centre du carré lu : le modèle est un peu plus petit que la zone lue,
-    donc la lettre est retrouvée même décalée de quelques pixels."""
     h, w = gris.shape[:2]
     m = max(2, int(round(min(h, w) * 0.12)))
     return gris[m:h - m, m:w - m].copy()
 
 
 def lettre_plausible(gris):
-    """Carré sombre avec une lettre claire dedans (évite d'apprendre un bout de décor)."""
     return gris is not None and float(np.median(gris)) < 90 and int(gris.max()) > 150
 
 
 def nom_touche_depuis_fichier(fichier):
-    # "Z.png" -> Z ; "Z_2.png" -> Z (plusieurs modèles possibles pour une même lettre)
     return os.path.splitext(fichier)[0].split("_")[0].upper()
 
 
@@ -255,7 +223,6 @@ def charger_modeles(cfg, taille_max, log=print):
 
 
 def sauver_modele(nom, gris):
-    """Enregistre templates/<nom>.png (ou <nom>_2.png...). Renvoie le nom de fichier."""
     os.makedirs(TEMPLATES_DIR, exist_ok=True)
     fichier, i = f"{nom}.png", 2
     while os.path.exists(os.path.join(TEMPLATES_DIR, fichier)):
@@ -272,7 +239,6 @@ def lettres_a_nommer():
 
 
 def nommer_inconnue(chemin, nom):
-    """Range une lettre de a_renommer/ comme modèle de la touche `nom` (ou la jette si nom vide)."""
     nom = (nom or "").strip().upper()
     if nom:
         if nom not in VK:
@@ -284,7 +250,6 @@ def nommer_inconnue(chemin, nom):
 
 
 def meilleur_match(gris, modeles):
-    """(nom, vk, score) du modèle de lettre le plus ressemblant."""
     best = (None, None, -1.0)
     for nom, vk, tpl, _ in modeles:
         res = cv2.matchTemplate(gris, tpl, cv2.TM_CCOEFF_NORMED)
@@ -297,7 +262,6 @@ def meilleur_match(gris, modeles):
 
 
 def wrap(a):
-    """Angle ramené dans [-180, 180)."""
     return (a + 180.0) % 360.0 - 180.0
 
 
@@ -314,12 +278,7 @@ def _masque(hsv, plages):
     return m
 
 
-# --------------------------------------------------------------------------
-# Trouver le cercle tout seul sur une capture plein écran
-# --------------------------------------------------------------------------
 def detecter_cercle(img, cfg, centre_recherche=None, rayon_recherche=None):
-    """Cherche le skill-check (anneau + barre bleue + aiguille rouge + lettre) près du centre.
-    Renvoie {"centre": (x, y), "rayon": R, "anneau_px": (r_in, r_out)} en pixels de l'image, ou None."""
     if img.ndim == 3 and img.shape[2] == 4:
         img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
     H, W = img.shape[:2]
@@ -333,7 +292,7 @@ def detecter_cercle(img, cfg, centre_recherche=None, rayon_recherche=None):
     yb, xb = np.nonzero(bleu)
     yr, xr = np.nonzero(rouge)
     if len(xb) < 15 or len(xr) < 4:
-        return None  # il faut voir la barre ET l'aiguille
+        return None
 
     gris = cv2.GaussianBlur(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), (5, 5), 1.5)
     rmin, rmax = int(min(H, W) * 0.025), int(min(H, W) * 0.17)
@@ -346,13 +305,11 @@ def detecter_cercle(img, cfg, centre_recherche=None, rayon_recherche=None):
     v = hsv[..., 2]
     best = None
     for x, y, R in cands:
-        # 1) une lettre claire dans un carré sombre au centre
         c = max(3, int(0.2 * R))
         cxi, cyi = int(round(x)), int(round(y))
         centre = v[max(0, cyi - c):cyi + c, max(0, cxi - c):cxi + c]
         if centre.size == 0 or not (np.median(centre) < 90 and centre.max() > 150):
             continue
-        # 2) la barre bleue : un arc d'un seul tenant, toujours à la même distance du centre
         db = np.hypot(xb - x, yb - y) / R
         sel = (db > 0.6) & (db < 1.08)
         if np.count_nonzero(sel) < 15:
@@ -365,7 +322,6 @@ def detecter_cercle(img, cfg, centre_recherche=None, rayon_recherche=None):
         etendue = np.ptp(wrap(ang[bloc] - Analyseur._moyenne(ang[bloc])))
         if nb < 15 or not 3 <= etendue <= 170 or np.std(db[sel][bloc]) > 0.08:
             continue
-        # 3) l'aiguille rouge sur l'anneau
         dr = np.hypot(xr - x, yr - y) / R
         nr = np.count_nonzero((dr > 0.45) & (dr < 1.08))
         if nr < 4:
@@ -377,7 +333,6 @@ def detecter_cercle(img, cfg, centre_recherche=None, rayon_recherche=None):
         return None
     _, x, y, R = best
 
-    # recentrage sur la lettre blanche (elle est pile au centre du cercle)
     blanc = (hsv[..., 2] > 180) & (hsv[..., 1] < 60)
     yw, xw = np.nonzero(blanc)
     if len(xw):
@@ -387,7 +342,6 @@ def detecter_cercle(img, cfg, centre_recherche=None, rayon_recherche=None):
             if np.hypot(lx - x, ly - y) < 6:
                 x, y = (x + lx) / 2, (y + ly) / 2
 
-    # épaisseur de l'anneau = où sont la barre et l'aiguille (seulement leur bloc : pas le décor)
     def rayons(xs, ys, rmin, rmax):
         d = np.hypot(xs - x, ys - y)
         sel = (d > rmin * R) & (d < rmax * R)
@@ -407,8 +361,6 @@ def detecter_cercle(img, cfg, centre_recherche=None, rayon_recherche=None):
 
 
 def _bande_pleine(rayons):
-    """Rayons où il y a vraiment de la matière (profil radial >= 30 % du pic, d'un seul tenant autour
-    du pic) : les bords flous et les bouts de décor collés ne comptent pas."""
     h = np.bincount(np.round(rayons).astype(int))
     pic = int(np.argmax(h))
     ok = h >= 0.3 * h[pic]
@@ -422,7 +374,6 @@ def _bande_pleine(rayons):
 
 
 def _traits_aiguille(nouveau):
-    """Petits traits rouges allongés d'une image -> [(cx, cy, dx, dy, points)] (axe principal)."""
     n, lab, stats, _ = cv2.connectedComponentsWithStats(nouveau, connectivity=8)
     traits = []
     for i in range(1, n):
@@ -434,7 +385,7 @@ def _traits_aiguille(nouveau):
         mx, my = xs.mean(), ys.mean()
         cov = np.cov(np.vstack([xs - mx, ys - my]))
         vals, vecs = np.linalg.eigh(cov)
-        if vals[0] <= 0 or vals[1] / max(vals[0], 1e-6) < 6:   # doit être allongé (un trait)
+        if vals[0] <= 0 or vals[1] / max(vals[0], 1e-6) < 6:
             continue
         dx, dy = vecs[:, 1]
         if len(xs) > 60:
@@ -445,10 +396,6 @@ def _traits_aiguille(nouveau):
 
 
 def detecter_cercle_anime(prendre, cfg, duree=1.2):
-    """Détection pendant qu'un skill-check tourne. À chaque image, l'aiguille rouge (qui vient
-    d'apparaître à cet endroit) est un petit trait qui pointe vers le centre : on cherche le point
-    où tous ces traits se croisent (vote, le décor qui bouge est éliminé).
-    prendre() renvoie la zone de recherche (BGRA). Coordonnées renvoyées : dans cette zone."""
     rouge_pl, bleu_pl = _plages(cfg, "rouge_hsv"), _plages(cfg, "bleu_hsv")
     noyau = np.ones((3, 3), np.uint8)
     passe, traits, derniere, n = [], [], None, 0
@@ -462,7 +409,6 @@ def detecter_cercle_anime(prendre, cfg, duree=1.2):
         n += 1
         if cv2.countNonZero(_masque(hsv, bleu_pl)) > 15:
             derniere = hsv
-        # rouge apparu depuis ~60 ms (l'aiguille a bougé ; le décor fixe disparaît)
         avant = None
         while passe and t - passe[0][0] >= 0.06:
             avant = passe.pop(0)[1]
@@ -475,14 +421,14 @@ def detecter_cercle_anime(prendre, cfg, duree=1.2):
         return _rien(f"pas assez de traits d'aiguille ({len(traits)})")
 
     P = np.array([(a[0], a[1]) for a in traits])
-    N = np.array([(-a[3], a[2]) for a in traits])          # normale de chaque trait
+    N = np.array([(-a[3], a[2]) for a in traits])
     c_ = np.einsum("ij,ij->i", N, P)
     rng = np.random.default_rng(0)
     meilleur, m = None, len(traits)
     for _ in range(400):
         i, j = rng.choice(m, 2, replace=False)
         A = np.array([N[i], N[j]])
-        if abs(np.linalg.det(A)) < 0.3:                  # traits presque parallèles
+        if abs(np.linalg.det(A)) < 0.3:
             continue
         c = np.linalg.solve(A, [c_[i], c_[j]])
         ok = np.abs(N @ c - c_) < 3.0
@@ -490,23 +436,18 @@ def detecter_cercle_anime(prendre, cfg, duree=1.2):
             meilleur = ok
     if meilleur is None or meilleur.sum() < 6:
         return _rien("les traits ne se croisent pas")
-    # affinage : point le plus proche de tous les traits retenus
     Ni, ci = N[meilleur], c_[meilleur]
     cx, cy = np.linalg.solve(Ni.T @ Ni, Ni.T @ ci)
-    # l'aiguille est toujours à la même distance du centre : on écarte les traits du décor
     rc = np.hypot(P[:, 0] - cx, P[:, 1] - cy)
     med = np.median(rc[meilleur])
     meilleur &= np.abs(rc - med) < 0.15 * med
     ang = np.degrees(np.arctan2(P[meilleur][:, 1] - cy, P[meilleur][:, 0] - cx)) % 360
-    if meilleur.sum() < 6 or len(np.unique((ang // 15).astype(int))) < 6:  # assez d'angles balayés
+    if meilleur.sum() < 6 or len(np.unique((ang // 15).astype(int))) < 6:
         return _rien("balayage trop court")
     pts = np.vstack([traits[k][4] for k in np.flatnonzero(meilleur)])
     ai_in, ai_out = _bande_pleine(np.hypot(pts[:, 0] - cx, pts[:, 1] - cy))
-    # anneau = partie extérieure de l'aiguille, là où est la barre (jeu : aiguille 52-80 px, barre 65-80 px).
-    # On ne mesure pas la barre elle-même : un décor bleu collé pourrait la fausser.
     r_in = ai_in + 0.4 * (ai_out - ai_in) - 2
     r_out = ai_out + 1
-    # vérif : une lettre claire dans un carré sombre au centre
     v = derniere[..., 2]
     c = max(3, int(0.22 * r_out))
     centre = v[max(0, int(cy) - c):int(cy) + c, max(0, int(cx) - c):int(cx) + c]
@@ -525,14 +466,12 @@ def _rien(raison):
 
 
 def zone_recherche(mon):
-    """Carré autour du centre de l'écran où chercher le skill-check."""
     s = int(min(mon["width"], mon["height"]) * 0.3)
     cx, cy = mon["left"] + mon["width"] // 2, mon["top"] + mon["height"] // 2
     return {"left": cx - s, "top": cy - s, "width": 2 * s, "height": 2 * s}
 
 
 def trouver_cercle(sct, cfg, mon, duree=1.2):
-    """Détection complète (aiguille qui tourne, sinon image fixe). Applique le résultat à cfg."""
     zr = zone_recherche(mon)
     det = detecter_cercle_anime(lambda: np.asarray(sct.grab(zr)), cfg, duree)
     if det:
@@ -544,8 +483,6 @@ def trouver_cercle(sct, cfg, mon, duree=1.2):
 
 
 def appliquer_detection(cfg, det, decalage=(0, 0)):
-    """Met la zone + l'anneau trouvés dans cfg. Garde la taille de zone si elle change peu
-    (les lettres apprises restent valables)."""
     cx, cy = det["centre"][0] + decalage[0], det["centre"][1] + decalage[1]
     cote = int(np.ceil(2 * det["rayon"])) + 4
     ancienne = cfg.get("zone")
@@ -560,9 +497,6 @@ def appliquer_detection(cfg, det, decalage=(0, 0)):
     return cfg
 
 
-# --------------------------------------------------------------------------
-# Analyse de la zone : lettre au centre, barre bleue + aiguille rouge sur l'anneau
-# --------------------------------------------------------------------------
 class Analyseur:
     def __init__(self, cfg, h, w):
         self.cfg = cfg
@@ -570,7 +504,7 @@ class Analyseur:
         yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
         dx, dy = xx - cx, yy - cy
         r = np.sqrt(dx * dx + dy * dy) / (min(h, w) / 2.0)
-        ang = np.arctan2(dy, dx)                     # précalculé une fois -> rapide
+        ang = np.arctan2(dy, dx)
         self.angle = (np.degrees(ang) % 360.0).astype(np.float32)
         self.r = r
         self.rbin = np.clip((r * 50).astype(np.int32), 0, 99)
@@ -583,7 +517,8 @@ class Analyseur:
         self.rouge = _plages(cfg, "rouge_hsv")
         self.vert = _plages(cfg, "vert_hsv")
         self.min_b, self.min_r = int(cfg["min_pixels_bleu"]), int(cfg["min_pixels_rouge"])
-        self.nb_bleu = self.nb_rouge = self.nb_vert = 0
+        self.nb_bleu = self.nb_rouge = self.nb_vert = self.nb_barre = 0
+        self.raison = None
 
     def set_anneau(self, r_in, r_out, calibre=False):
         self.anneau_r = (float(r_in), float(r_out))
@@ -592,8 +527,6 @@ class Analyseur:
         self.calibre = calibre
 
     def calibrer(self, bgra):
-        """Trouve l'anneau NOIR du cercle (profil radial des pixels sombres).
-        Renvoie [r_in, r_out] ou None si pas clair (anneau transparent, décor sombre la nuit...)."""
         v = cv2.cvtColor(cv2.cvtColor(bgra, cv2.COLOR_BGRA2BGR), cv2.COLOR_BGR2HSV)[..., 2]
         ok = (self.r >= 0.35) & (self.r <= 1.15)
         tot = np.bincount(self.rbin[ok], minlength=100).astype(np.float64)
@@ -607,7 +540,7 @@ class Analyseur:
         a, b = run[0] / 50.0, (run[-1] + 1) / 50.0
         if not (0.04 <= b - a <= 0.35 and 0.45 <= (a + b) / 2 <= 1.05):
             return None
-        if b - a >= 0.10:  # un peu à l'intérieur : le décor visible juste au bord ne doit pas compter
+        if b - a >= 0.10:
             a, b = a + 0.02, b - 0.02
         return [round(a, 3), round(b, 3)]
 
@@ -623,9 +556,6 @@ class Analyseur:
 
     @staticmethod
     def _blocs(angles, pont=None, trou=3):
-        """Blocs d'angles d'un seul tenant (cases de 2°), en tolérant des trous de `trou` cases.
-        `pont` = angles qui bouchent les trous (l'aiguille posée sur la barre la coupe en deux).
-        Renvoie [(masque, nb_pixels, epaisseur)] ; epaisseur = pixels par case de 2° occupée."""
         nb = 180
         cases = (angles * 0.5).astype(np.int32) % nb
         h = np.bincount(cases, minlength=nb)
@@ -634,7 +564,7 @@ class Analyseur:
             occ = occ | (np.bincount((pont * 0.5).astype(np.int32) % nb, minlength=nb) > 0)
         vides = np.flatnonzero(~occ)
         if vides.size == 0:
-            return []  # tout l'anneau est coloré : ce n'est pas une barre
+            return []
         dep = int(vides[0])
         occ_r, h_r = np.roll(occ, -dep), np.roll(h, -dep)
         runs, cur, nb_trou = [], None, 0
@@ -658,23 +588,17 @@ class Analyseur:
 
     @staticmethod
     def _directions_pleines(angles):
-        """Masque des pixels situés dans une direction (case de 2°) qui en contient au moins
-        30 % du maximum des directions les plus remplies."""
         cases = (angles * 0.5).astype(np.int32) % 180
         h = np.bincount(cases, minlength=180)
-        ref = np.percentile(h[h > 0], 90) if np.any(h) else 0
-        return h[cases] >= max(2, 0.3 * ref)
+        return h[cases] >= max(2, 0.3 * h.max())
 
     @staticmethod
     def _bloc(angles, pont=None, trou=3):
-        """Le plus gros bloc (masque) ou None."""
         blocs = Analyseur._blocs(angles, pont, trou)
         return max(blocs, key=lambda b: b[1])[0] if blocs else None
 
     @staticmethod
     def _bloc_epais(angles, mini, pont=None):
-        """Le bloc le plus épais (vraie barre / aiguille) parmi ceux d'au moins `mini` pixels.
-        Un liseré de décor au bord de l'anneau est fin : il est écarté."""
         blocs = [b for b in Analyseur._blocs(angles, pont) if b[1] >= mini]
         return max(blocs, key=lambda b: b[2])[0] if blocs else None
 
@@ -683,46 +607,49 @@ class Analyseur:
         rad = np.radians(angles)
         return float(np.degrees(np.arctan2(np.sin(rad).mean(), np.cos(rad).mean())) % 360.0)
 
+    def _rien(self, raison):
+        self.raison = raison
+        return None
+
     def barre(self, bgra):
-        """(centre_bleu, debut, fin, rouge) - debut/fin/rouge relatifs au centre bleu, en degrés.
-        None si pas de barre bleue ou pas d'aiguille rouge visible."""
         mb, mr, hsv = self.masques(bgra)
         self.nb_bleu, self.nb_rouge = cv2.countNonZero(mb), cv2.countNonZero(mr)
-        if self.nb_bleu < self.min_b or self.nb_rouge < self.min_r:
-            return None
+        self.nb_barre = 0
+        self.raison = None
+        if self.nb_bleu < self.min_b:
+            return self._rien("pas de bleu")
+        if self.nb_rouge < self.min_r:
+            return self._rien("pas de rouge")
         if self.calibre:
-            # anneau noir calibré : le cercle est-il vraiment affiché ? (anneau noir / bleu / rouge presque partout)
             sombre = np.count_nonzero((hsv[..., 2] < 70) & (self.anneau > 0))
             if sombre + self.nb_bleu + self.nb_rouge < 0.7 * self.nb_anneau:
-                return None
+                return self._rien("anneau pas sombre")
         ab, ar = self.angle[mb > 0], self.angle[mr > 0]
-        # on ne garde que les directions bien remplies : un liseré de décor au bord de l'anneau
-        # (1-2 pixels par direction) disparaît, la barre et l'aiguille restent
         ab, ar = ab[self._directions_pleines(ab)], ar[self._directions_pleines(ar)]
         if len(ab) < self.min_b or len(ar) < self.min_r:
-            return None
-        # barre = bloc bleu le plus épais (un bout de décor bleu ailleurs, ou un liseré, est ignoré)
+            return self._rien("directions pleines")
         bloc = self._bloc_epais(ab, self.min_b, ar)
         if bloc is None:
-            return None
+            return self._rien("pas de bloc bleu")
         ab = ab[bloc]
+        if np.bincount((ab * 0.5).astype(np.int32) % 180).max() < 0.35 * self.nb_anneau / 180:
+            return self._rien("barre trop fine")
+        self.nb_barre = len(ab)
         centre = self._moyenne(ab)
         debut, fin = np.percentile(wrap(ab - centre), (1, 99))
         if not 3 <= fin - debut <= 170:
-            return None
-        # aiguille = bloc rouge le plus épais (elle traverse tout l'anneau ; un liseré de décor est fin)
+            return self._rien("largeur de barre")
         bloc = self._bloc_epais(ar, self.min_r)
         if bloc is None:
-            return None
+            return self._rien("pas de bloc rouge")
         ar = ar[bloc]
         rouge = self._moyenne(ar)
         if np.ptp(wrap(ar - rouge)) > 40:
-            return None
+            return self._rien("aiguille trop large")
         return centre, float(debut), float(fin), float(wrap(rouge - centre))
 
 
 class Decideur:
-    """Décide quand appuyer. Une seule fois par skill-check."""
 
     def __init__(self, cfg):
         self.attendre = bool(cfg["attendre_barre"])
@@ -733,15 +660,18 @@ class Decideur:
         self.reset()
 
     def reset(self):
-        self.verrou = None      # (lettre, centre_bleu) du dernier appui
+        self.verrou = None
         self.t_vue = 0.0
-        self.prev = None        # dernier angle rouge (absolu) observé
+        self.prev = None
         self.prev_t = 0.0
-        self.vit = None         # vitesse de l'aiguille en degrés/s (signée)
-        self.t_sans_vit = None  # depuis quand on voit l'aiguille sans connaître sa vitesse
+        self.vit = None
+        self.t_sans_vit = None
+        self.saut = False
+        self.info = None
 
     def etape(self, nom, barre, now):
-        if nom is None:  # pas de cercle à l'écran
+        self.saut = False
+        if nom is None:
             self.prev = self.vit = self.t_sans_vit = None
             if self.verrou and now - self.t_vue >= self.absence:
                 self.verrou = None
@@ -751,6 +681,7 @@ class Decideur:
         if not self.attendre:
             if self.verrou is None or self.verrou[0] != nom:
                 self.verrou = (nom, None)
+                self.info = {"mode": "sans attendre la barre"}
                 return True
             return False
 
@@ -759,15 +690,14 @@ class Decideur:
             return False
         centre, debut, fin, rel = barre
 
-        # vitesse de l'aiguille (mise à jour seulement quand elle a bougé)
         rouge = (centre + rel) % 360.0
         saut = False
         if self.prev is None:
             self.prev, self.prev_t = rouge, now
         else:
             dv, dt = wrap(rouge - self.prev), now - self.prev_t
-            if abs(dv) > 60 or dt > 0.25:          # aiguille repartie de zéro -> nouveau skill-check
-                saut = abs(dv) > 60
+            if abs(dv) > 60 or dt > 0.25:
+                saut = self.saut = abs(dv) > 60
                 self.prev, self.prev_t, self.vit = rouge, now, None
             elif abs(dv) >= 0.5 and dt > 0:
                 v = dv / dt
@@ -779,7 +709,6 @@ class Decideur:
         else:
             self.t_sans_vit = None
 
-        # déjà appuyé pour ce skill-check ? (nouvelle lettre, barre déplacée ou aiguille repartie = nouveau)
         if self.verrou:
             meme = (not saut and self.verrou[0] == nom and self.verrou[1] is not None
                     and abs(wrap(centre - self.verrou[1])) <= 15)
@@ -787,30 +716,33 @@ class Decideur:
                 return False
             self.verrou = None
 
-        # on attend de connaître la vitesse pour viser juste (max 150 ms)
         if self.vit is None and now - self.t_sans_vit < 0.15:
             return False
 
-        # position prévue de l'aiguille au moment où le jeu recevra la touche
-        # (+ âge de l'image : depuis quand cette position est affichée)
-        pred = rel + (self.vit or 0.0) * (self.lat + (now - self.prev_t))
+        age = now - self.prev_t
+        pred = rel + (self.vit or 0.0) * (self.lat + age)
         larg = fin - debut
         m = min(self.marge, larg * 0.25)
         entree = max(m, self.cible * larg)
         if self.vit is None or abs(self.vit) < 1:
             ok = debut + m <= pred <= fin - m
-        elif self.vit > 0:                       # tourne dans le sens des angles croissants
+        elif self.vit > 0:
             ok = debut + entree <= pred <= fin - m
         else:
             ok = debut + m <= pred <= fin - entree
         if ok:
             self.verrou = (nom, centre)
+            pos = (pred - debut) / larg if (self.vit or 1) > 0 else (fin - pred) / larg
+            self.info = {"rel": round(rel, 2), "debut": round(debut, 2), "fin": round(fin, 2),
+                         "largeur": round(larg, 2), "pred": round(pred, 2), "pos_prevue": round(pos, 3),
+                         "vit": None if self.vit is None else round(self.vit, 1),
+                         "age_image_ms": round(age * 1000, 2), "latence_ms": round(self.lat * 1000, 1),
+                         "cible": self.cible}
             return True
         return False
 
 
 class CollecteurInconnues:
-    """Sauve les lettres pas encore apprises (une seule fois chacune) dans templates/a_renommer/."""
 
     def __init__(self):
         self.dossier = os.path.join(TEMPLATES_DIR, A_RENOMMER)
@@ -826,7 +758,6 @@ class CollecteurInconnues:
         return np.isfinite(s) and s >= seuil
 
     def voir(self, gris):
-        # attend 3 images identiques d'affilée (évite les images en pleine animation)
         if self.prec is not None and self._pareil(gris, self.prec, 0.97):
             self.stable += 1
         else:
@@ -845,40 +776,249 @@ class CollecteurInconnues:
         return fichier
 
 
-# --------------------------------------------------------------------------
-# Le moteur (utilisé par la ligne de commande, l'appli et la simulation)
-# --------------------------------------------------------------------------
 def heure():
     return datetime.now().strftime("%H:%M:%S.%f")[:-3]
 
 
-class Moteur:
-    """Le bot. run() tourne en boucle (dans un thread pour l'appli).
-    Pilotage : .actif, .apercu, .demande_detection, .arreter(). État publié : image, barre, nom, score..."""
+LOGS_DIR = os.path.join(BASE, "logs")
 
-    def __init__(self, cfg, log=print, debug=False, actif=False, touche_quitter=True):
+
+def _json_defaut(o):
+    if isinstance(o, (np.integer,)):
+        return int(o)
+    if isinstance(o, (np.floating,)):
+        return float(o)
+    if isinstance(o, (np.ndarray, tuple, set)):
+        return list(o)
+    return str(o)
+
+
+class Journal:
+
+    GARDER = 80
+
+    def __init__(self, prefixe, actif=True, horodatage=None):
+        self.f, self.chemin = None, None
+        self.lock = threading.Lock()
+        if not actif:
+            return
+        try:
+            os.makedirs(LOGS_DIR, exist_ok=True)
+            self._nettoyer()
+            stamp = horodatage or datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.chemin = os.path.join(LOGS_DIR, f"{prefixe}_{stamp}.jsonl")
+            self.f = open(self.chemin, "a", encoding="utf-8", buffering=1)
+        except OSError:
+            self.f = None
+
+    def _nettoyer(self):
+        fichiers = sorted((os.path.join(LOGS_DIR, n) for n in os.listdir(LOGS_DIR)
+                           if n.endswith((".jsonl", ".md"))), key=os.path.getmtime)
+        for p in fichiers[:-self.GARDER] if len(fichiers) > self.GARDER else []:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+    def ev(self, type_, **data):
+        if self.f is None:
+            return
+        d = {"t": round(time.perf_counter(), 4), "h": heure(), "ev": type_}
+        d.update(data)
+        ligne = json.dumps(d, ensure_ascii=False, default=_json_defaut)
+        with self.lock:
+            try:
+                self.f.write(ligne + "\n")
+            except (OSError, ValueError):
+                pass
+
+    def fermer(self):
+        with self.lock:
+            if self.f:
+                self.f.close()
+                self.f = None
+
+
+class Suivi:
+
+    DISPARU_S = 0.35
+
+    def __init__(self, journal, log=print):
+        self.j, self.log = journal, log
+        self.cycle = self.check = None
+        self.n_cycle = 0
+        self.t_vu = 0.0
+        self.apres_vert = False
+        self.fins = []
+        self.stats = Counter()
+
+    def image(self, now, nom, score, barre, an, dec, vert):
+        self.fins = []
+        visible = barre is not None or nom is not None or vert
+        if not visible:
+            if (self.cycle or self.apres_vert) and now - self.t_vu > self.DISPARU_S:
+                self._disparu(now)
+            return
+        self.t_vu = now
+        if vert:
+            if self.cycle:
+                if self.check:
+                    self._fin_check(now, "réussi" if self.check["appui"] else "vert sans appui", "anneau vert")
+                self._fin_cycle(now, "crocheté")
+            self.apres_vert = True
+            return
+        if self.apres_vert:
+            if barre is None:
+                return
+            self.apres_vert = False
+        c = self.check
+        if barre is None and c is None:
+            return
+        if self.cycle is None:
+            self._debut_cycle(now)
+        cause = None
+        if c is None:
+            cause = "début"
+        elif nom and c["lettre"] and nom != c["lettre"]:
+            cause = "nouvelle lettre"
+        elif barre and c["centre"] is not None and abs(wrap(barre[0] - c["centre"])) > 15:
+            cause = "barre déplacée"
+        elif dec is not None and dec.saut:
+            cause = "aiguille repartie de zéro"
+        if cause:
+            if c:
+                self._fin_check(now, "réussi" if c["appui"] else "changé sans appui", cause)
+            self._debut_check(now, nom, score, barre)
+            c = self.check
+        c["images"] += 1
+        if nom:
+            if not c["lettre"]:
+                c["lettre"] = nom
+            if nom == c["lettre"]:
+                c["score_min"] = min(c["score_min"], score)
+        if barre is not None:
+            c["images_barre"] += 1
+            if c["centre"] is None:
+                c["centre"] = barre[0]
+            c["largeur"] = round(barre[2] - barre[1], 2)
+        else:
+            c["sans_barre"][an.raison or "?"] += 1
+        if dec is not None and dec.vit is not None:
+            c["vit"] = round(dec.vit, 1)
+
+    def appui(self, now, nom, score, envoye, info, raison=None):
+        c = self.check
+        if c is None:
+            return
+        a = {"t": round(now, 4), "lettre": nom, "score": round(score, 3), "envoye": envoye,
+             "depuis_debut_ms": round((now - c["t0"]) * 1000, 1)}
+        if info:
+            a.update(info)
+        if raison:
+            a["raison"] = raison
+        if envoye:
+            if c["appui"]:
+                c["appuis_en_plus"] += 1
+            else:
+                c["appui"] = a
+        self.j.ev("appui", cycle=self.n_cycle, n=c["n"], **a)
+
+    def _debut_cycle(self, now):
+        self.n_cycle += 1
+        self.cycle = {"n": self.n_cycle, "t0": now, "checks": []}
+        self.check = None
+        self.j.ev("cycle_debut", cycle=self.n_cycle)
+
+    def _debut_check(self, now, nom, score, barre):
+        n = len(self.cycle["checks"]) + 1
+        self.check = {"n": n, "t0": now, "lettre": nom, "score_min": score if nom else 1.0,
+                      "centre": barre[0] if barre else None,
+                      "largeur": round(barre[2] - barre[1], 2) if barre else None,
+                      "vit": None, "images": 0, "images_barre": 0, "sans_barre": Counter(),
+                      "appui": None, "appuis_en_plus": 0}
+        self.j.ev("check_debut", cycle=self.n_cycle, n=n, lettre=nom, score=round(score, 3),
+                  largeur=self.check["largeur"])
+
+    def _fin_check(self, now, resultat, cause):
+        c = self.check
+        self.check = None
+        if c is None:
+            return
+        a = c["appui"]
+        self.cycle["checks"].append(resultat)
+        if resultat.startswith("réussi"):
+            self.stats["checks_reussis"] += 1
+        elif resultat.startswith("raté"):
+            self.stats["checks_rates"] += 1
+        else:
+            self.stats["checks_sans_appui"] += 1
+        self.j.ev("check_fin", cycle=self.n_cycle, n=c["n"], lettre=c["lettre"], resultat=resultat,
+                  cause=cause, duree_ms=round((now - c["t0"]) * 1000, 1),
+                  delai_apres_appui_ms=round((now - a["t"]) * 1000, 1) if a else None,
+                  images=c["images"], images_barre=c["images_barre"], sans_barre=dict(c["sans_barre"]),
+                  score_min=round(c["score_min"], 3), largeur=c["largeur"], vit=c["vit"],
+                  appui=a, appuis_en_plus=c["appuis_en_plus"])
+        self.fins.append((c, resultat))
+
+    def _fin_cycle(self, now, resultat):
+        cy = self.cycle
+        self.cycle = None
+        if cy is None or not cy["checks"]:
+            return
+        self.stats["crochetages_ok" if resultat == "crocheté" else
+                   "crochetages_rates" if resultat == "raté" else "cycles_abandonnes"] += 1
+        duree = now - cy["t0"]
+        self.j.ev("cycle_fin", cycle=cy["n"], resultat=resultat, nb_checks=len(cy["checks"]),
+                  checks=cy["checks"], duree_ms=round(duree * 1000, 1))
+        if resultat == "crocheté":
+            self.log(f"CROCHETÉ : {len(cy['checks'])} check(s) en {duree:.1f} s")
+        elif resultat == "raté":
+            self.log(f"RATÉ au check {len(cy['checks'])} (cercle disparu sans vert)")
+
+    def _disparu(self, now):
+        self.apres_vert = False
+        if self.cycle is None:
+            return
+        c = self.check
+        if c:
+            self._fin_check(now, "raté (cercle disparu)" if c["appui"] else "disparu sans appui", "cercle disparu")
+        rate = c is not None and c["appui"] is not None
+        self._fin_cycle(now, "raté" if rate else "abandonné")
+
+
+class Moteur:
+
+    def __init__(self, cfg, log=print, debug=False, actif=False, touche_quitter=True,
+                 journal_prefixe="moteur", journal_horodatage=None):
         self.cfg, self.debug, self.actif, self.touche_quitter = cfg, debug, actif, touche_quitter
         self._log_fn = log
+        self.journal_prefixe, self.journal_horodatage = journal_prefixe, journal_horodatage
+        self.j = None
+        self.suivi = None
         self.stop = False
-        self.apercu = False             # True = analyse aussi en pause (aperçu de l'appli)
-        self.raccourcis = True          # False = ignore F6/F7/F8 (ex : simulation lancée à côté)
+        self.apercu = False
+        self.raccourcis = True
         self.demande_detection = False
         self.demande_rechargement = False
-        # état publié
         self.image = self.barre = self.nom = None
         self.score, self.fps = 0.0, 0.0
         self.cercle = False
         self.nb_appuis = self.nb_reussis = 0
+        self.nb_crochetages = self.nb_rates = 0
         self.dernier = ""
-        self.version_config = 0         # +1 quand la zone change (détection) : l'appli relit
+        self.version_config = 0
         self.an = None
         self.modeles = []
         self.nb_modeles = 0
 
-    # -------------------------------------------------------------- outils
     def log(self, msg):
         self.dernier = msg
         self._log_fn(f"[{heure()}] {msg}")
+        self.ev("log", msg=msg)
+
+    def ev(self, type_, **data):
+        if self.j:
+            self.j.ev(type_, **data)
 
     def arreter(self):
         self.stop = True
@@ -888,6 +1028,7 @@ class Moteur:
         if self.an:
             self.dec.reset()
         self.log("ACTIF" if self.actif else "EN PAUSE")
+        self.ev("etat", actif=self.actif)
 
     def _init_zone(self):
         zone = self.cfg.get("zone")
@@ -911,17 +1052,19 @@ class Moteur:
         if band:
             self.an.set_anneau(*band, calibre=True)
             self.log(f"Anneau calibré sur le cercle noir : {band}")
+            self.ev("calibrage", anneau=band)
         return band is not None
 
     def detecter(self):
         self.log("Recherche du cercle...")
         trouve = None
-        for _ in range(3):  # ~4 s : laisse le temps à un skill-check d'apparaître
+        for _ in range(3):
             trouve = trouver_cercle(self.sct, self.cfg, self.sct.monitors[1])
             if trouve:
                 break
         if trouve is None:
             self.log("Cercle pas trouvé : fais apparaître un skill-check (aiguille qui tourne) et réessaie")
+            self.ev("detection", trouve=False)
             return False
         sauver_config(self.cfg)
         self._init_zone()
@@ -929,12 +1072,52 @@ class Moteur:
         z = self.cfg["zone"]
         self.log(f"Cercle trouvé : centre ({z['left'] + z['width'] // 2}, {z['top'] + z['height'] // 2}), "
                  f"zone {z['width']} px")
+        self.ev("detection", trouve=True, zone=z, anneau=self.cfg.get("anneau"))
         return True
 
-    # -------------------------------------------------------------- boucle
+    def _capturer(self, check, hist, nb=8):
+        imgs = [(t, f) for t, f in hist if t >= check["t0"] - 0.05]
+        if not imgs:
+            return
+        if len(imgs) > nb:
+            imgs = [imgs[round(i * (len(imgs) - 1) / (nb - 1))] for i in range(nb)]
+        nom = os.path.splitext(os.path.basename(self.j.chemin))[0]
+        dossier = os.path.join(LOGS_DIR, "captures", nom)
+        try:
+            os.makedirs(dossier, exist_ok=True)
+            fichiers = []
+            for i, (t, f) in enumerate(imgs):
+                p = os.path.join(dossier, f"cycle{self.suivi.n_cycle:03d}_check{check['n']}_{i + 1}"
+                                          f"_{(t - check['t0']) * 1000:+05.0f}ms.png")
+                ecrire_image(p, np.ascontiguousarray(f))
+                fichiers.append(os.path.relpath(p, BASE))
+            self.ev("captures", cycle=self.suivi.n_cycle, n=check["n"], fichiers=fichiers)
+        except Exception as e:
+            self.ev("erreur", ou="captures", msg=str(e))
+
     def run(self):
+        self.j = Journal(self.journal_prefixe, bool(self.cfg.get("journal", True)), self.journal_horodatage)
+        self.suivi = Suivi(self.j, log=self.log)
+        self.ev("session_debut", version=VERSION, python=platform.python_version(), os=platform.platform(),
+                profil=os.path.basename(CONFIG_PATH), config=self.cfg, actif=self.actif)
+        code = 1
+        try:
+            code = self._boucle()
+            return code
+        except Exception:
+            import traceback
+            self.ev("erreur", trace=traceback.format_exc())
+            raise
+        finally:
+            if self.suivi.cycle:
+                self.suivi._fin_cycle(time.perf_counter(), "interrompu")
+            self.ev("session_fin", code=code, appuis=self.nb_appuis, checks_reussis=self.nb_reussis,
+                    stats=dict(self.suivi.stats))
+            self.j.fermer()
+
+    def _boucle(self):
         cfg = self.cfg
-        vk = lambda k: VK[str(cfg[k]).upper()]  # noqa: E731
+        vk = lambda k: VK[str(cfg[k]).upper()]
         vk_onoff, vk_det, vk_cap, vk_quit = (vk("touche_on_off"), vk("touche_detecter"),
                                              vk("touche_capture"), vk("touche_quitter"))
         speciales = {vk_onoff, vk_det, vk_cap, vk_quit}
@@ -952,17 +1135,20 @@ class Moteur:
         rac = Raccourcis()
         rac.synchro(list(speciales))
         lettre_capturee = None
-        candidat = None          # (lettre tapée par toi, image, instant) en attente du vert
+        candidat = None
         guette_lettres = False
-        t_vert = None            # attend le vert après un appui du bot (= réussi)
-        taille_barre = 0.0       # nb de pixels de la barre bleue (pour reconnaître la barre devenue verte)
+        taille_barre = 0.0
         nb_frames, t_fps, t_debug = 0, time.perf_counter(), 0.0
+        t_perf, n_perf = time.perf_counter(), 0
+        hist, t_hist = deque(maxlen=60), 0.0
+        captures = bool(cfg.get("captures_echec", True)) and self.j.f is not None
         self._init_zone()
 
         with MSS() as sct:
             self.sct = sct
+            self.ev("ecran", moniteurs=sct.monitors, zone=cfg.get("zone"), anneau=cfg.get("anneau"),
+                    modeles=self.nb_modeles)
             while not self.stop:
-                # --- raccourcis / demandes de l'appli ---
                 rc = self.raccourcis
                 if rc and self.touche_quitter and rac.appui(vk_quit):
                     self.log("Bye.")
@@ -984,7 +1170,6 @@ class Moteur:
                         lettre_capturee = None
                         self.log("Capture annulée")
 
-                # --- F8 : on attend le nom de la lettre ---
                 if lettre_capturee is not None:
                     for nom, v in lettres_vk:
                         if rac.appui(v):
@@ -993,6 +1178,7 @@ class Moteur:
                             self.recharger_modeles()
                             self.dec.reset()
                             self.log(f"Lettre apprise : {nom} ({dossier_modeles()}/{f})")
+                            self.ev("lettre_apprise", lettre=nom, comment="F8")
                             break
                     time.sleep(0.005)
                     continue
@@ -1006,9 +1192,8 @@ class Moteur:
                         self.cercle = False
                         time.sleep(0.02)
                         continue
-                    time.sleep(0.03)  # en pause : on regarde quand même (aperçu, apprentissage), moins vite
+                    time.sleep(0.03)
 
-                # --- détection ---
                 an = self.an
                 frame = np.asarray(sct.grab(self.zone))
                 gris = None
@@ -1027,39 +1212,45 @@ class Moteur:
                 reconnu = nom if score >= seuil else None
                 self.image, self.barre, self.nom, self.score = frame, barre, nom, score
                 self.cercle = bool(reconnu or barre)
-                # réussi = la barre devient verte : le vert REMPLACE le bleu (même taille, plus de bleu).
-                # Un bout de décor vert derrière l'anneau ne compte donc pas.
-                if barre is not None:
-                    taille_barre = an.nb_bleu if not taille_barre else 0.8 * taille_barre + 0.2 * an.nb_bleu
-                vert = bool(taille_barre and an.nb_vert >= max(8, 0.4 * taille_barre)
-                            and an.nb_bleu < 0.3 * taille_barre)
+                vert_anneau = an.nb_vert >= 0.45 * an.nb_anneau
+                vert_barre = bool(taille_barre and an.nb_vert >= max(8, 0.4 * taille_barre)
+                                  and an.nb_barre < 0.3 * taille_barre)
+                vert = vert_anneau or vert_barre
+                if barre is not None and not vert:
+                    taille_barre = an.nb_barre if not taille_barre else 0.8 * taille_barre + 0.2 * an.nb_barre
 
-                # --- appui ---
-                if self.actif and self.dec.etape(reconnu, barre if self.dec.attendre else None, maintenant):
+                barre_dec = barre if self.dec.attendre and not vert else None
+                decide = self.actif and self.dec.etape(reconnu, barre_dec, maintenant) and not vert
+                self.suivi.image(maintenant, reconnu, score, barre, an, self.dec if self.actif else None, vert)
+                if decide:
                     titre = titre_premier_plan() if cible else ""
                     if cible and cible.lower() not in titre.lower():
                         self.log(f"{nom} PAS envoyé : fenêtre active « {titre[:40]} » (attendu « {cible} »)")
+                        self.suivi.appui(maintenant, nom, score, False, self.dec.info,
+                                         raison=f"fenêtre active « {titre[:60]} »")
                     else:
                         appuyer(vkn, appui_ms)
                         self.nb_appuis += 1
-                        t_vert = maintenant
+                        self.suivi.appui(maintenant, nom, score, True, self.dec.info)
                         info = ""
                         if barre:
                             _, debut, fin, rel = barre
                             info = f" | rouge {rel:+.0f}° dans [{debut:+.0f}°, {fin:+.0f}°]"
                         self.log(f"-> {nom}  (lettre {score:.2f}{info})")
 
-                # --- barre verte = réussi (et ce check est fini : on réarme pour le suivant) ---
                 if vert:
                     self.dec.verrou = None
-                if t_vert is not None:
-                    if vert:
+                if captures and maintenant - t_hist >= 0.025:
+                    hist.append((maintenant, frame))
+                    t_hist = maintenant
+                for c, res in self.suivi.fins:
+                    if res.startswith("réussi"):
                         self.nb_reussis += 1
-                        t_vert = None
-                    elif maintenant - t_vert > 0.6:
-                        t_vert = None
+                    elif res.startswith("raté") and captures:
+                        self._capturer(c, hist)
+                self.nb_crochetages = self.suivi.stats["crochetages_ok"]
+                self.nb_rates = self.suivi.stats["crochetages_rates"]
 
-                # --- lettre inconnue ---
                 inconnue = (not fixe and reconnu is None and barre is not None and lettre_plausible(gris))
                 if inconnue:
                     f = self.collecteur.voir(gris)
@@ -1077,22 +1268,29 @@ class Moteur:
                                 break
                     if candidat is not None:
                         n, g, t = candidat
-                        if vert:
-                            sauver_modele(n, rogner_modele(g))
-                            self.recharger_modeles()
-                            self.log(f"Lettre apprise toute seule : {n} (tu l'as jouée, barre verte)")
-                            candidat = None
-                        elif maintenant - t > 0.6:
+                        for c, res in self.suivi.fins:
+                            if c["t0"] <= t:
+                                if not res.startswith(("raté", "disparu")):
+                                    sauver_modele(n, rogner_modele(g))
+                                    self.recharger_modeles()
+                                    self.log(f"Lettre apprise toute seule : {n} (tu l'as jouée, check réussi)")
+                                    self.ev("lettre_apprise", lettre=n, comment="jouée à la main")
+                                candidat = None
+                                break
+                        if candidat is not None and maintenant - t > 3.0:
                             candidat = None
 
-                # --- stats / debug ---
                 nb_frames += 1
+                n_perf += 1
                 if maintenant - t_fps >= 1.0:
                     self.fps, nb_frames, t_fps = nb_frames / (maintenant - t_fps), 0, maintenant
+                if maintenant - t_perf >= 10.0:
+                    self.ev("perf", images_par_s=round(n_perf / (maintenant - t_perf), 1), actif=self.actif)
+                    t_perf, n_perf = maintenant, 0
                 if self.debug and maintenant - t_debug >= 0.15:
                     t_debug = maintenant
                     b = (f"bleu [{barre[1]:+4.0f},{barre[2]:+4.0f}] rouge {barre[3]:+5.0f}°"
-                         if barre else f"bleu {an.nb_bleu:4d}px rouge {an.nb_rouge:3d}px")
+                         if barre else f"bleu {an.nb_bleu:4d}px rouge {an.nb_rouge:3d}px ({an.raison or '-'})")
                     v = f"{self.dec.vit:+5.0f}°/s" if self.dec.vit is not None else "   -   "
                     print(f"  lettre {nom or '-':>5} {score:4.2f} | {b} | vit {v} | vert {an.nb_vert:3d} | "
                           f"{self.fps:5.0f}/s   ", end="\r", flush=True)
@@ -1112,9 +1310,6 @@ def lancer(cfg, debug, actif=False):
     return m.run()
 
 
-# --------------------------------------------------------------------------
-# Choix de la zone (ligne de commande)
-# --------------------------------------------------------------------------
 def detecter_cli(cfg, ecran):
     print("Lance un skill-check dans le jeu (barre bleue + aiguille visibles)...")
     with MSS() as sct:
@@ -1158,7 +1353,6 @@ def choisir_zone(cfg, valeurs, ecran, centre=None):
         if w == 0 or h == 0:
             print("Annulé.")
             return 1
-        # essaie de recaler pile sur le cercle à l'intérieur de la sélection
         det = detecter_cercle(img, cfg, centre_recherche=(x + w // 2, y + h // 2),
                               rayon_recherche=max(w, h) * 0.75)
         if det:
@@ -1180,15 +1374,12 @@ def choisir_zone(cfg, valeurs, ecran, centre=None):
     return 0
 
 
-# --------------------------------------------------------------------------
-# Test sur une image
-# --------------------------------------------------------------------------
 def tester_image(cfg, chemin):
     img = lire_image(chemin, cv2.IMREAD_COLOR)
     if img is None:
         print("Image illisible :", chemin)
         return 1
-    if max(img.shape[:2]) > 600:  # capture plein écran : on cherche le cercle dedans
+    if max(img.shape[:2]) > 600:
         det = detecter_cercle(img, cfg)
         if det is None:
             print("Cercle pas trouvé dans l'image.")
@@ -1219,7 +1410,7 @@ def tester_image(cfg, chemin):
     cy, cx, R = (h - 1) / 2, (w - 1) / 2, min(h, w) / 2
     ys, xs = an.lettre_sl
     cv2.rectangle(out, (xs.start, ys.start), (xs.stop - 1, ys.stop - 1), (255, 255, 255), 1)
-    for rr in an.anneau_r:  # zone où on cherche barre + aiguille (vert)
+    for rr in an.anneau_r:
         cv2.circle(out, (int(round(cx)), int(round(cy))), int(round(rr * R)), (0, 255, 0), 1)
     if res is None:
         print("Pas de barre bleue + aiguille rouge détectées.")
@@ -1238,7 +1429,7 @@ def tester_image(cfg, chemin):
 
 
 def main():
-    try:  # vrais pixels même avec un zoom Windows à 125/150 %
+    try:
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
     except Exception:
         pass
