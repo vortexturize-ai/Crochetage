@@ -14,8 +14,20 @@ siphon. Il lit l'anneau au centre de l'écran, reconnaît la lettre, suit l'aigu
 check après check, jusqu'à la barre verte.
 
 > [!NOTE]
-> **Fait uniquement pour Baylife**, `fivem://connect/9zj5ay`. L'anneau, les lettres et les couleurs sont
-> calés sur ce serveur, et le bot vérifie que tu y es connecté avant chaque appui : ailleurs, il reste en veille.
+> **Fait uniquement pour Baylife.** L'anneau, les lettres et les couleurs sont calés sur ce serveur, et le bot
+> vérifie que tu y es connecté avant chaque appui : ailleurs, il reste en veille.
+
+<p align="center">
+  <a href="https://cfx.re/join/9zj5ay"><img src="docs/baylife_carte.png" alt="Baylife, serveur GTA RP sur FiveM" width="420"></a>
+  <br>
+  <a href="https://cfx.re/join/9zj5ay"><img src="docs/bouton_serveur.png" alt="Se connecter au serveur" width="260"></a>
+</p>
+
+<p align="center">
+  <sub>Adresse : <code>cfx.re/join/9zj5ay</code> · serveur <code>gta.bay.life</code> · dans la console F8 de FiveM : <code>connect cfx.re/join/9zj5ay</code></sub>
+  <br>
+  <sub>Projet indépendant, sans lien avec l'équipe de Baylife.</sub>
+</p>
 
 <table>
   <tr>
