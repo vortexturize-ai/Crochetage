@@ -229,7 +229,7 @@ image dans `templates/a_renommer/`.
 | Vraie capture du jeu | cercle, barre et aiguille trouvés au pixel près |
 | Détection sur 26 scènes : vraie capture, leurres rouges en mouvement, décors de la simulation | centre à **0 px** en médiane, **1,6 px** au pire |
 | Faux cercles de 195 px trouvés avant sur Baylife | rejetés : anneau noir sur 24 à 32 % du tour seulement |
-| En jeu sur Baylife, zone de base | **4 / 4** appuis réussis, A, A, Z, Z, à 35 % de la barre en moyenne |
+| En jeu sur Baylife, siphon d'essence | **4 / 4** crochetages, **32 / 32** checks, appui à 38 % ± 4 % de la barre |
 | Vraies lettres E et R du jeu, avec les seules lettres de base | reconnues, 0,889 et 0,94 |
 
 ---
