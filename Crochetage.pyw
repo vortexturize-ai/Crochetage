@@ -31,6 +31,7 @@ import pystray
 from PIL import Image, ImageDraw, ImageTk
 
 import autotouche as at
+from overlay import OverlayAnneau
 
 ROUGE, ROUGE_FONCE, ROUGE_CLAIR = "#E32344", "#B8162F", "#FF5872"
 FOND, NOIR, CARTE, CARTE2, BORD = "#0E0E11", "#08080A", "#17171C", "#212128", "#2E2E37"
@@ -234,87 +235,6 @@ class Curseur(tk.Canvas):
         self.itemconfigure(self.txt, text=self.fmt(self.valeur))
 
 
-class Overlay:
-    def __init__(self, app):
-        self.app, px = app, app.px
-        self.w, self.h = px(360), px(74)
-        u32 = ctypes.windll.user32
-        u32.GetForegroundWindow.restype = wt.HWND
-        u32.SetForegroundWindow.argtypes = [wt.HWND]
-        avant = u32.GetForegroundWindow()
-        t = self.top = tk.Toplevel(app.root)
-        t.title("Crochetage overlay")
-        t.overrideredirect(True)
-        t.attributes("-topmost", True)
-        t.configure(bg=NOIR)
-        x = (app.root.winfo_screenwidth() - self.w) // 2
-        t.geometry(f"{self.w}x{self.h}+{x}+{px(14)}")
-        c = self.c = tk.Canvas(t, width=self.w, height=self.h, bg=NOIR, highlightthickness=0)
-        c.pack()
-        c.create_rectangle(0, 0, px(5), self.h, fill=ROUGE, outline="")
-        c.create_rectangle(0, 0, self.w - 1, self.h - 1, outline=BORD)
-        self.it_titre = c.create_text(px(18), px(16), anchor="w", text="CROCHETAGE  ·  ACTIF", fill=ROUGE_CLAIR,
-                                      font=app.police(11, True))
-        self.it_point = c.create_oval(0, 0, 0, 0, fill=ROUGE, outline="")
-        self.it_statut = c.create_text(px(18), px(39), anchor="w", text="", fill=TEXTE, font=app.police(16, True))
-        self.it_info = c.create_text(px(18), px(60), anchor="w", text="", fill=TEXTE2, font=app.police(11))
-        t.attributes("-alpha", 0.0)
-        t.update_idletasks()
-        self.hwnd = u32.GetParent(t.winfo_id()) or t.winfo_id()
-        ex = u32.GetWindowLongW(self.hwnd, -20)
-        u32.SetWindowLongW(self.hwnd, -20, ex | 0x80000 | 0x20 | 0x80 | 0x8000000 | 0x8)
-        if avant:
-            u32.SetForegroundWindow(avant)
-        self.visible, self.textes = False, None
-
-    def montrer(self, oui):
-        if oui == self.visible:
-            return
-        self.visible = oui
-        self.top.attributes("-alpha", 0.93 if oui else 0.0)
-        if oui:
-            u32 = ctypes.windll.user32
-            u32.SetWindowPos.argtypes = [wt.HWND, wt.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wt.UINT]
-            u32.SetWindowPos(self.hwnd, wt.HWND(-1), 0, 0, 0, 0, 0x1 | 0x2 | 0x10)
-
-    def maj(self, m):
-        cfg = self.app.cfg
-        self.montrer(bool(cfg.get("overlay", True) and m.actif and m.jeu_devant))
-        if not self.visible:
-            return
-        maintenant = time.perf_counter()
-        su = m.suivi
-        dc = su.dernier_cycle if su else None
-        couleur = TEXTE
-        if not m.serveur_ok:
-            hote = (m.serveur_url or "aucun").split("//")[-1].strip("/")
-            statut, couleur = "En veille : pas sur Baylife", TEXTE2
-            info = f"Serveur : {hote}"
-        else:
-            if dc and maintenant - dc["t"] < 3.0 and dc["resultat"] == "crocheté":
-                statut, couleur = f"Crocheté  ✓   ({dc['nb_checks']} checks)", "#3DDC84"
-            elif dc and maintenant - dc["t"] < 3.0 and dc["resultat"] == "raté":
-                statut, couleur = f"Raté au check {dc['nb_checks']}", ROUGE_CLAIR
-            elif su and su.cycle:
-                n = su.check["n"] if su.check else len(su.cycle["checks"]) + 1
-                statut = f"Crochetage en cours  ·  check {n}"
-            elif m.an is None:
-                statut, couleur = "Cercle pas trouvé : F7", TEXTE2
-            else:
-                statut = "Prêt  ·  en attente du cercle"
-            info = f"Baylife ✓   ·   crochetés {m.nb_crochetages}   ·   ratés {m.nb_rates}"
-        textes = (statut, couleur, info)
-        if textes != self.textes:
-            self.textes = textes
-            self.c.itemconfigure(self.it_statut, text=statut, fill=couleur)
-            self.c.itemconfigure(self.it_info, text=info)
-        bb = self.c.bbox(self.it_titre)
-        r = self.app.px(4)
-        cy = (bb[1] + bb[3]) / 2
-        self.c.coords(self.it_point, bb[2] + self.app.px(8), cy - r, bb[2] + self.app.px(8) + 2 * r, cy + r)
-        self.c.itemconfigure(self.it_point, state="normal" if int(maintenant * 2) % 2 == 0 else "hidden")
-
-
 class App:
     def __init__(self):
         self.root = tk.Tk()
@@ -342,7 +262,9 @@ class App:
         self.moteur = None
         self.demarrer_moteur(actif=False)
         self.construire()
-        self.overlay = Overlay(self)
+        self.overlay = OverlayAnneau(
+            self.root, lambda: self.moteur,
+            lambda m: bool(self.cfg.get("overlay", True) and m.actif and m.jeu_devant), f=self.f)
         self.creer_icone()
         self.root.bind("<FocusOut>", lambda e: self.root.after(250, self._verifier_focus))
         self.root.after(60, self.boucle)
@@ -468,6 +390,7 @@ class App:
             pass
         if self.sim and self.sim.poll() is None:
             self.sim.terminate()
+        self.overlay.fermer()
         self.root.destroy()
 
     def construire(self):
@@ -699,7 +622,6 @@ class App:
                 self.sim = None
                 self.moteur.raccourcis = True
             self.maj_icone()
-            self.overlay.maj(self.moteur)
             if self.visible and self.vue == "accueil":
                 self.maj_accueil()
         except Exception:

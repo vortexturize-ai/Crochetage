@@ -19,6 +19,7 @@ import numpy as np
 from PIL import ImageTk
 
 import autotouche as at
+import overlay
 import scene
 
 TITRE = "Simulation crochetage"
@@ -45,6 +46,7 @@ class Simulation:
         self.R = 82 * k
         self.injection = queue.Queue()
         self.moteur = None
+        self.overlay = None
         self.thread_bot = None
         self.stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.j = at.Journal("sim_verite", True, self.stamp)
@@ -551,6 +553,8 @@ class Simulation:
             print(f"[sim] Rapport : {os.path.relpath(chemin, at.BASE)}")
         except Exception as e:
             print(f"[sim] Rapport impossible : {e}")
+        if self.overlay:
+            self.overlay.fermer()
         self.root.destroy()
 
     def preparer_bot(self):
@@ -645,6 +649,9 @@ class Simulation:
     def demarrer(self):
         if not self.args.sans_bot:
             self.demarrer_bot(self.preparer_bot())
+            if not self.args.sans_overlay:
+                self.overlay = overlay.OverlayAnneau(self.root, lambda: self.moteur, lambda m: m.actif,
+                                                     f=self.root.winfo_fpixels("1i") / 96.0)
         self.premier_plan()
         self.t_tick = self.t_debut = time.perf_counter()
         self.t_suivant = self.t_debut + 1.5
@@ -661,6 +668,7 @@ def main(argv=None):
     p.add_argument("--fenetre", action="store_true", help="dans une fenêtre au lieu du plein écran")
     p.add_argument("--sans-bot", action="store_true", help="ne lance pas le bot (pour jouer toi-même)")
     p.add_argument("--bot-pause", action="store_true", help="le bot démarre en pause (F6 pour l'activer)")
+    p.add_argument("--sans-overlay", action="store_true", help="n'affiche pas l'overlay du bot sur l'anneau")
     p.add_argument("--debug", action="store_true", help="infos de détection du bot en direct dans la console")
     p.add_argument("--scene", default="mix", choices=["mix", "vehicule", "porte"], help="ce qu'on crochète")
     p.add_argument("--difficulte", default="mix", choices=list(DIFFICULTES) + ["mix"])

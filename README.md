@@ -165,13 +165,29 @@ Le bot n'appuie que si **FiveM est au premier plan** et que tu es **connecté à
 appui. Sur un autre serveur, il reste en veille et le note dans le journal (« PAS envoyé : serveur … »).
 Réglage `serveur_cible` dans `config.json` (`bay.life` par défaut, vide = tous les serveurs).
 
-### 8. L'overlay en jeu
-Dès que le bot est actif et que FiveM est devant, un bandeau s'affiche en haut de l'écran : prêt, crochetage
-en cours (numéro du check), crocheté ou raté, serveur, compteurs. Il ne prend jamais le focus, laisse passer
-les clics et se cache dès que le bot est en pause ou que tu quittes le jeu. Réglage `overlay` dans
-`config.json`.
+### 8. L'overlay en jeu, sur l'anneau
+Dès que le bot est actif et que FiveM est devant, tout ce que fait le moteur se dessine **en direct sur
+l'anneau** ([`overlay.py`](overlay.py)) :
 
-<p align="center"><img src="docs/overlay.png" alt="L'overlay en jeu" width="380"></p>
+| Couleur | Ce que c'est |
+|---|---|
+| 🟢 vert | l'anneau où le bot cherche la barre et l'aiguille |
+| 🔵 cyan | la barre trouvée (ses deux bords) |
+| 🔴 rouge | l'aiguille telle qu'il vient de la mesurer |
+| ⚪ pointillés | où sera l'aiguille quand le jeu recevra la touche |
+| 🟡 jaune | la fenêtre dans laquelle il appuiera |
+
+En haut, la lettre lue et son score. En bas, l'état (vise, appui, réussi, crocheté, raté, pas envoyé…), le
+numéro du check, la vitesse de l'aiguille et l'angle restant avant l'appui. L'anneau flashe en blanc à
+l'appui et en vert quand c'est réussi.
+
+<p align="center"><img src="docs/overlay.png" alt="L'overlay sur l'anneau : vise, appui, crocheté" width="100%"></p>
+
+L'overlay ne prend jamais le focus, laisse passer les clics et se cache dès que le bot est en pause ou que
+tu quittes le jeu. Il est **invisible pour les captures d'écran** (exclu par Windows) : le bot ne voit donc
+pas ses propres traits, et l'overlay n'apparaît pas non plus dans tes captures, tes enregistrements ou tes
+streams. Si Windows ne peut pas l'exclure, il n'affiche que les textes autour de l'anneau, jamais dedans.
+Réglage `overlay` dans `config.json`. La simulation l'affiche aussi (`--sans-overlay` pour l'enlever).
 
 ### 9. Apprendre les lettres
 - **Tout seul** : sur une lettre inconnue, tu la joues toi-même. Si le check suivant apparaît (ou si
@@ -294,6 +310,7 @@ défaut), `capture` (`auto` par défaut, `dxgi` ou `mss`), `journal` (journal d�
 |---|---|
 | [`Crochetage.pyw`](Crochetage.pyw) | l'appli (zone de notification + fenêtre style Mullvad) |
 | [`autotouche.py`](autotouche.py) | le moteur : détection, analyse, décision, clavier, journal (utilisable aussi en ligne de commande) |
+| [`overlay.py`](overlay.py) | l'overlay dessiné en direct sur l'anneau, en jeu et dans la simulation |
 | [`simulation.py`](simulation.py) | la simulation d'entraînement |
 | [`scene.py`](scene.py) | les décors de la simulation (rue de nuit, véhicule, porte, mini-carte) |
 | [`rapport.py`](rapport.py) | le rapport d'analyse des journaux |

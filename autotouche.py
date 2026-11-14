@@ -1093,6 +1093,10 @@ class Moteur:
         self.an = None
         self.modeles = []
         self.nb_modeles = 0
+        self.vert = self.inconnue = self.detection_en_cours = False
+        self.t_appui, self.appui_nom, self.appui_info = 0.0, None, None
+        self.t_refus, self.refus = 0.0, ""
+        self.capture_mode = "mss"
 
     def log(self, msg):
         self.dernier = msg
@@ -1139,6 +1143,13 @@ class Moteur:
         return band is not None
 
     def detecter(self):
+        self.detection_en_cours = True
+        try:
+            return self._detecter()
+        finally:
+            self.detection_en_cours = False
+
+    def _detecter(self):
         self.log("Recherche du cercle...")
         trouve = None
         for _ in range(3):
@@ -1319,6 +1330,7 @@ class Moteur:
                     vert_barre = bool(taille_barre and an.nb_vert >= max(8, 0.4 * taille_barre)
                                       and an.nb_barre < 0.3 * taille_barre)
                     vert = vert_anneau or vert_barre
+                    self.vert = vert
                     if nouvelle and barre is not None and not vert:
                         taille_barre = an.nb_barre if not taille_barre else 0.8 * taille_barre + 0.2 * an.nb_barre
 
@@ -1334,12 +1346,15 @@ class Moteur:
                             self.log(f"{nom} PAS envoyé : fenêtre active « {titre[:40]} » (attendu « {cible} »)")
                             self.suivi.appui(maintenant, nom, score, False, self.dec.info,
                                              raison=f"fenêtre active « {titre[:60]} »")
+                            self.t_refus, self.refus = maintenant, f"{cible} pas devant"
                         elif not serveur_ok:
                             self.log(f"{nom} PAS envoyé : serveur « {url or 'inconnu'} » (attendu « {serveur_cible} »)")
                             self.suivi.appui(maintenant, nom, score, False, self.dec.info,
                                              raison=f"serveur « {url or 'inconnu'} »")
+                            self.t_refus, self.refus = maintenant, "mauvais serveur"
                         else:
                             appuyer(vkn, appui_ms)
+                            self.t_appui, self.appui_nom, self.appui_info = maintenant, nom, self.dec.info
                             self.nb_appuis += 1
                             self.suivi.appui(maintenant, nom, score, True, self.dec.info)
                             info = ""
@@ -1363,6 +1378,7 @@ class Moteur:
 
                     if nouvelle:
                         inconnue = (not fixe and reconnu is None and barre is not None and lettre_plausible(gris))
+                        self.inconnue = inconnue
                     if inconnue and nouvelle:
                         f = self.collecteur.voir(gris)
                         if f:
