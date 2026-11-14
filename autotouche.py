@@ -204,13 +204,27 @@ def _send(scan, flags):
     user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
 
 
-def appuyer(vk, duree_ms):
+def appuyer(vk, duree_ms, attendre=True):
     scan = user32.MapVirtualKeyW(vk, 0)
     ext = KEYEVENTF_EXTENDEDKEY if vk in EXTENDED_VK else 0
     _send(scan, ext)
-    if duree_ms > 0:
+    if duree_ms <= 0:
+        _send(scan, ext | KEYEVENTF_KEYUP)
+    elif attendre:
         time.sleep(duree_ms / 1000.0)
-    _send(scan, ext | KEYEVENTF_KEYUP)
+        _send(scan, ext | KEYEVENTF_KEYUP)
+    else:
+        relache = threading.Timer(duree_ms / 1000.0, _send, (scan, ext | KEYEVENTF_KEYUP))
+        relache.daemon = True
+        relache.start()
+
+
+def attendre_jusqua(t):
+    reste = t - time.perf_counter()
+    if reste > 0.003:
+        time.sleep(reste - 0.002)
+    while time.perf_counter() < t:
+        pass
 
 
 class Raccourcis:
@@ -875,6 +889,7 @@ class Analyseur:
 class Decideur:
     FENETRE_S = 0.30
     SAUT_DEG = 60.0
+    HORIZON_S = 0.1
 
     def __init__(self, cfg):
         self.attendre = bool(cfg["attendre_barre"])
@@ -897,6 +912,7 @@ class Decideur:
         self.t_sans_vit = None
         self.saut = False
         self.info = None
+        self.attente = 0.0
 
     def _oublier(self):
         self.trace.clear()
@@ -973,6 +989,12 @@ class Decideur:
             return debut + entree, fin - m
         return debut + m, fin - entree
 
+    def dt_image(self):
+        if len(self.trace) < 3:
+            return 1 / 60.0
+        t = np.array([p[0] for p in list(self.trace)[-8:]])
+        return float(min(0.2, max(0.002, np.median(np.diff(t)))))
+
     def prevision(self, centre, now):
         pos = self.position(now)
         if pos is None:
@@ -981,6 +1003,7 @@ class Decideur:
 
     def etape(self, nom, barre, now, nouvelle=True):
         self.saut = False
+        self.attente = 0.0
         if nom is None:
             self._oublier()
             if self.verrou and now - self.t_vue >= self.absence:
@@ -1027,19 +1050,31 @@ class Decideur:
         if pred is None:
             return False
         lo, hi = self.fenetre(debut, fin)
-        if lo <= pred <= hi:
-            larg = fin - debut
-            self.verrou = (nom, centre)
-            pos = (pred - debut) / larg if (self.vit or 1) > 0 else (fin - pred) / larg
-            self.info = {"rel": round(rel, 2), "debut": round(debut, 2), "fin": round(fin, 2),
-                         "largeur": round(larg, 2), "pred": round(pred, 2), "pos_prevue": round(pos, 3),
-                         "vit": None if self.vit is None else round(self.vit, 1),
-                         "mesures": len(self.trace), "depart": None if self.depart is None else round(self.depart, 1),
-                         "departs": len(self.departs), "trace_debut": round(self.trace[0][1], 1) if self.trace else None,
-                         "age_image_ms": round((now - self.prev_t) * 1000, 2),
-                         "latence_ms": round(self.lat * 1000, 1), "cible": self.cible}
-            return True
-        return False
+        attente = 0.0
+        if not lo <= pred <= hi:
+            if self.vit is None or abs(self.vit) < 30:
+                return False
+            sens = 1.0 if self.vit > 0 else -1.0
+            entree = lo if sens > 0 else hi
+            reste = (entree - pred) * sens
+            horizon = min(0.2, max(self.HORIZON_S, 1.5 * self.dt_image()))
+            if not 0 < reste <= abs(self.vit) * horizon:
+                return False
+            attente = (reste + 0.5) / abs(self.vit)
+            pred = entree + 0.5 * sens
+        larg = fin - debut
+        self.verrou = (nom, centre)
+        self.attente = attente
+        pos = (pred - debut) / larg if (self.vit or 1) > 0 else (fin - pred) / larg
+        self.info = {"rel": round(rel, 2), "debut": round(debut, 2), "fin": round(fin, 2),
+                     "largeur": round(larg, 2), "pred": round(pred, 2), "pos_prevue": round(pos, 3),
+                     "vit": None if self.vit is None else round(self.vit, 1),
+                     "mesures": len(self.trace), "depart": None if self.depart is None else round(self.depart, 1),
+                     "departs": len(self.departs), "trace_debut": round(self.trace[0][1], 1) if self.trace else None,
+                     "age_image_ms": round((now - self.prev_t) * 1000, 2),
+                     "latence_ms": round(self.lat * 1000, 1), "cible": self.cible,
+                     "attente_ms": round(attente * 1000, 2)}
+        return True
 
 
 class CollecteurInconnues:
@@ -1525,6 +1560,7 @@ class Moteur:
             self.ev("erreur", ou="captures", msg=str(e))
 
     def run(self):
+        sys.setswitchinterval(0.001)
         self.j = Journal(self.journal_prefixe, bool(self.cfg.get("journal", True)), self.journal_horodatage)
         self.suivi = Suivi(self.j, log=self.log)
         self.ev("session_debut", version=VERSION, python=platform.python_version(), os=platform.platform(),
@@ -1690,8 +1726,10 @@ class Moteur:
                                              raison=f"serveur « {url or 'inconnu'} »")
                             self.t_refus, self.refus = maintenant, "mauvais serveur"
                         else:
-                            appuyer(vkn, appui_ms)
-                            self.t_appui, self.appui_nom, self.appui_info = maintenant, nom, self.dec.info
+                            if self.dec.attente > 0:
+                                attendre_jusqua(maintenant + self.dec.attente)
+                            appuyer(vkn, appui_ms, attendre=False)
+                            self.t_appui, self.appui_nom, self.appui_info = time.perf_counter(), nom, self.dec.info
                             self.nb_appuis += 1
                             self.suivi.appui(maintenant, nom, score, True, self.dec.info)
                             info = ""

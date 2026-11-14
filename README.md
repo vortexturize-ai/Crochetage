@@ -148,7 +148,13 @@ position prévue = position ajustée à l'instant présent + vitesse × latence
 ```
 
 Il appuie dès que la position prévue atteint **35 % de la barre** (réglable). Ça laisse de la marge
-avant et après, même sur les petites barres. Tant que la vitesse n'est pas connue, il attend une
+avant et après, même sur les petites barres.
+
+**Appui programmé** : le bot n'attend pas l'image suivante pour se décider. Dès que l'aiguille doit
+atteindre ce point dans les 100 prochaines millisecondes, ou avant l'image suivante si le jeu rame, il
+calcule l'instant exact, attend jusqu'à cette milliseconde et appuie. Une baisse d'images ou un coup de lag
+de la capture ne le font donc plus sauter par-dessus la barre. La touche est relâchée en arrière-plan,
+sans bloquer la lecture des images suivantes. Tant que la vitesse n'est pas connue, il attend une
 image de plus. Un saut de plus de 60° par rapport à la trajectoire prévue signale un nouveau check,
 même après une image sans aiguille.
 
@@ -181,28 +187,31 @@ appui. Sur un autre serveur, il reste en veille et le note dans le journal (« P
 Réglage `serveur_cible` dans `config.json` (`bay.life` par défaut, vide = tous les serveurs).
 
 ### 8. L'overlay en jeu, sur l'anneau
-Dès que le bot est actif et que FiveM est devant, tout ce que fait le moteur se dessine **en direct sur
-l'anneau** ([`overlay.py`](overlay.py)) :
+Dès que le bot est actif et que FiveM est devant, l'overlay ([`overlay.py`](overlay.py)) se pose **autour
+de l'anneau du jeu**, sur une fine piste juste à l'extérieur, sans jamais rien cacher du mini-jeu :
 
-| Couleur | Ce que c'est |
+| Repère | Ce que c'est |
 |---|---|
-| 🟢 vert | l'anneau où le bot cherche la barre et l'aiguille |
-| 🔵 cyan | la barre trouvée (ses deux bords) |
-| 🔴 rouge | l'aiguille telle qu'il vient de la mesurer |
-| ⚪ pointillés | où sera l'aiguille quand le jeu recevra la touche |
-| 🟡 jaune | la fenêtre dans laquelle il appuiera |
+| arc cyan | la barre telle que le moteur la lit |
+| point rouge et sa traînée | l'aiguille, en direct |
+| point blanc | l'endroit exact où partira l'appui |
+| piste qui pulse | l'appui vient de partir |
+| piste verte ou rouge | crocheté ou raté, puis tout s'efface |
 
-En haut, la lettre lue et son score. En bas, l'état (vise, appui, réussi, crocheté, raté, pas envoyé…), le
-numéro du check, la vitesse de l'aiguille et l'angle restant avant l'appui. L'anneau flashe en blanc à
-l'appui et en vert quand c'est réussi. Quand aucun crochetage n'est affiché, il se réduit à une petite
-mention « crochetage prêt » : rien ne gêne la partie.
+Dessous, une seule petite étiquette : la lettre et le numéro du check, puis « Appui », « Crocheté · 8/8 »
+ou « Raté au check 3 ». Quand aucun crochetage n'est affiché, il ne reste qu'une pastille « Prêt ».
 
-<p align="center"><img src="docs/overlay.png" alt="L'overlay sur l'anneau : vise, appui, crocheté" width="100%"></p>
+C'est une vraie fenêtre Windows en **transparence par pixel** : tout est dessiné en triple résolution puis
+réduit, donc les bords sont lisses, sans crénelage ni liseré. Elle se place au pixel près sur le centre de
+l'anneau, apparaît et disparaît en fondu, et ne coûte qu'environ 3 ms par image, uniquement quand
+quelque chose bouge.
+
+<p align="center"><img src="docs/overlay.png" alt="L'overlay sur l'anneau : visée, appui, crocheté, raté" width="100%"></p>
 
 L'overlay ne prend jamais le focus, laisse passer les clics et se cache dès que le bot est en pause ou que
 tu quittes le jeu. Il est **invisible pour les captures d'écran** (exclu par Windows) : le bot ne voit donc
 pas ses propres traits, et l'overlay n'apparaît pas non plus dans tes captures, tes enregistrements ou tes
-streams. Si Windows ne peut pas l'exclure, il n'affiche que les textes autour de l'anneau, jamais dedans.
+streams. Si Windows ne peut pas l'exclure, il n'affiche que l'étiquette sous l'anneau, jamais rien dessus.
 Réglage `overlay` dans `config.json`. La simulation l'affiche aussi (`--sans-overlay` pour l'enlever).
 
 ### 9. Apprendre les lettres
@@ -222,6 +231,9 @@ image dans `templates/a_renommer/`.
 | Simulation de vol de véhicule et de porte (trafic, gyrophares, pluie), 4 min | **49 / 49** crochetages, **226 / 226** checks, 0 appui en trop |
 | Cas piège : même lettre et même barre deux fois de suite, dont 16 en fin de tour | **42 / 42** checks |
 | Rejeu hors ligne des 19 sessions de simulation enregistrées | **2 380 / 2 380** checks |
+| Rejeu de checks façon jeu à 30 images/s, un coup de lag de 80 à 220 ms toutes les 2 s | 95,8 % avant, **98,8 %** avec l'appui programmé |
+| Même rejeu à 120 images/s | 96,7 % avant, **99,7 %** |
+| Rejeu des 2 380 checks de la simulation à 15 images/s | 69,8 % avant, **98,1 %** |
 | Où tombe l'appui dans la barre (cible 35 %) | **33 % ± 3 %** |
 | Écart entre l'appui prévu et l'appui réel | **0,9 ms** d'écart-type, pire cas 4,9 ms |
 | Le bot sait-il s'il a réussi ? | d'accord avec la vérité sur **49 / 49** crochetages |
