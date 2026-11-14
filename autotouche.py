@@ -59,6 +59,7 @@ DEFAULT_CONFIG = {
     "overlay": True,
     "sons": True,
     "logo_anime": True,
+    "logo_position": "gauche",
     "volume_sons": 0.7,
     "bleu_hsv": [[90, 100, 100], [130, 255, 255]],
     "rouge_hsv": [[0, 100, 90], [10, 255, 255], [168, 100, 90], [179, 255, 255]],

@@ -463,14 +463,14 @@ def _premult(rgba):
 class LogoAnime:
     FONDU_S = 0.3
 
-    def __init__(self, moteur_fn, visible_fn, chemin_logo, exclure=True):
+    def __init__(self, moteur_fn, visible_fn, chemin_logo, exclure=True, position="gauche"):
         self.moteur_fn, self.visible_fn = moteur_fn, visible_fn
         self.fenetre = FenetreCouche(exclure)
         H = u32.GetSystemMetrics(1)
         W = u32.GetSystemMetrics(0)
         self.u = u = max(0.7, H / 1080.0)
         self.cote = int(round(150 * u))
-        self.x = int(W - self.cote - 14 * u)
+        self.x = int(14 * u) if position == "gauche" else int(W - self.cote - 14 * u)
         self.y = int(H - self.cote - 92 * u)
         self.t0 = time.perf_counter()
         self.alpha, self.t_prec, self.t_top = 0.0, self.t0, 0.0
@@ -479,22 +479,16 @@ class LogoAnime:
 
     def _preparer(self, chemin):
         u, C = self.u, self.cote
-        b = int(round(62 * u))
-        k = 4
-        grand = np.zeros((b * k, b * k, 4), np.uint8)
-        r = int(b * k * 0.26)
-        coul = (16, 13, 12, 245)
-        cv2.rectangle(grand, (r, 0), (b * k - 1 - r, b * k - 1), coul, -1, cv2.LINE_AA)
-        cv2.rectangle(grand, (0, r), (b * k - 1, b * k - 1 - r), coul, -1, cv2.LINE_AA)
-        for cx, cy in ((r, r), (b * k - 1 - r, r), (r, b * k - 1 - r), (b * k - 1 - r, b * k - 1 - r)):
-            cv2.circle(grand, (cx, cy), r, coul, -1, cv2.LINE_AA)
-        badge = Image.fromarray(cv2.cvtColor(grand, cv2.COLOR_BGRA2RGBA)).resize((b, b), Image.LANCZOS)
+        b = int(round(64 * u))
         try:
-            logo = _logo_carre(chemin, int(b * 0.72))
-            badge.alpha_composite(logo, ((b - logo.width) // 2, (b - logo.height) // 2))
+            logo = np.asarray(_logo_carre(chemin, b))
         except Exception:
-            pass
-        self.badge = _premult(np.asarray(badge))
+            logo = np.zeros((b, b, 4), np.uint8)
+        ombre = np.zeros_like(logo)
+        ombre[..., 3] = cv2.GaussianBlur(logo[..., 3], (0, 0), 3.0 * u)
+        ombre[..., 3] = (ombre[..., 3].astype(np.float32) * 0.55).astype(np.uint8)
+        self.badge = _premult(logo)
+        self.ombre = _premult(ombre)
         yy, xx = np.mgrid[0:C, 0:C].astype(np.float32)
         d = np.hypot(xx - C / 2, yy - C / 2) / (C / 2)
         self.halo = (np.clip(1.0 - d, 0, 1) ** 2.2)[..., None]
@@ -579,7 +573,10 @@ class LogoAnime:
         couche = cv2.resize(couche, (C, C), interpolation=cv2.INTER_AREA).astype(np.float32)
         img = couche + img * (1.0 - couche[..., 3:4] / 255.0)
         b = self.badge.shape[0]
-        M = np.float32([[1, 0, (C - b) / 2], [0, 1, (C - b) / 2 + dy]])
+        M = np.float32([[1, 0, (C - b) / 2], [0, 1, (C - b) / 2 + dy + 2 * u]])
+        ombre = cv2.warpAffine(self.ombre, M, (C, C), flags=cv2.INTER_LINEAR, borderValue=(0, 0, 0, 0))
+        img = ombre + img * (1.0 - ombre[..., 3:4] / 255.0)
+        M[1, 2] -= 2 * u
         badge = cv2.warpAffine(self.badge, M, (C, C), flags=cv2.INTER_LINEAR, borderValue=(0, 0, 0, 0))
         img = badge + img * (1.0 - badge[..., 3:4] / 255.0)
         return np.clip(img + 0.5, 0, 255).astype(np.uint8)

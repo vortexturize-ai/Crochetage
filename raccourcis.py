@@ -3,7 +3,7 @@ import subprocess
 import sys
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 ICONE = os.path.join(BASE, "crochetage.ico")
@@ -27,8 +27,7 @@ def logo():
 def badge(taille, s_logo):
     s = taille * 4
     im = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    ImageDraw.Draw(im).rounded_rectangle([0, 0, s - 1, s - 1], radius=int(s * 0.24), fill=(12, 12, 15, 255))
-    m = int(s * 0.74)
+    m = int(s * 0.94)
     im.alpha_composite(s_logo.resize((m, m), Image.LANCZOS), ((s - m) // 2, (s - m) // 2))
     return im.resize((taille, taille), Image.LANCZOS)
 

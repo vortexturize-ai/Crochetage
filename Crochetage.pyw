@@ -195,7 +195,7 @@ class Api:
         self._app = app
 
     def infos(self):
-        return {"logo": url_png(badge(64))}
+        return {"logo": url_png(icone(True, 96))}
 
     def etat(self):
         return self._app.etat()
@@ -273,7 +273,8 @@ class App:
             on_top=True, resizable=False, background_color="#0B0B0E", easy_drag=False, shadow=True)
         self.animateur = ov.Animateur([
             lambda: ov.OverlayAnneau(None, lambda: self.moteur, self._overlay_visible),
-            lambda: ov.LogoAnime(lambda: self.moteur, self._logo_visible, os.path.join(BASE, "logo.png")),
+            lambda: ov.LogoAnime(lambda: self.moteur, self._logo_visible, os.path.join(BASE, "logo.png"),
+                                 position=self.cfg.get("logo_position", "gauche")),
         ])
 
     def _overlay_visible(self, m):
