@@ -372,5 +372,5 @@ En ligne de commande : `python autotouche.py --test capture.png` teste la détec
 ---
 
 <p align="center">
-  <sub>Du même auteur : <a href="https://github.com/vortexturize-ai/paperasse"><b>Paperasse</b></a>, tes papiers rangés et expliqués · <a href="https://github.com/vortexturize-ai">profil</a></sub>
+  <sub>Du même auteur : <a href="https://github.com/ninoelhaj/paperasse"><b>Paperasse</b></a>, tes papiers rangés et expliqués · <a href="https://github.com/ninoelhaj">profil</a></sub>
 </p>
