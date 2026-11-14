@@ -127,15 +127,20 @@ quand même reconnue.
   moins 35 % de l'épaisseur de l'anneau.
 
 ### 4. Prévoir le bon moment
-La vitesse de l'aiguille est mesurée en direct, dans les deux sens de rotation. Le bot calcule :
+L'aiguille tourne à vitesse constante pendant un check. Le bot garde toutes ses positions mesurées depuis le
+début du check, sur les 300 dernières millisecondes, et en tire la vitesse par une **régression robuste**
+(estimateur de Theil-Sen : médiane des pentes entre toutes les paires de mesures). Une image mal lue, ou
+deux images livrées presque en même temps, ne faussent donc plus la vitesse. La position actuelle est
+estimée de la même façon, puis projetée :
 
 ```
-position prévue = aiguille + vitesse × (latence + âge de l'image)
+position prévue = position ajustée à l'instant présent + vitesse × latence
 ```
 
 Il appuie dès que la position prévue atteint **35 % de la barre** (réglable). Ça laisse de la marge
-avant et après, même sur les petites barres. Si la vitesse n'est pas encore connue, il attend une
-image de plus.
+avant et après, même sur les petites barres. Tant que la vitesse n'est pas connue, il attend une
+image de plus. Un saut de plus de 60° par rapport à la trajectoire prévue signale un nouveau check,
+même après une image sans aiguille.
 
 ### 5. Appuyer, une seule fois
 - La touche part avec `SendInput` en **code de touche** (scancode) : le jeu la reçoit comme une vraie
@@ -179,7 +184,8 @@ l'anneau** ([`overlay.py`](overlay.py)) :
 
 En haut, la lettre lue et son score. En bas, l'état (vise, appui, réussi, crocheté, raté, pas envoyé…), le
 numéro du check, la vitesse de l'aiguille et l'angle restant avant l'appui. L'anneau flashe en blanc à
-l'appui et en vert quand c'est réussi.
+l'appui et en vert quand c'est réussi. Quand aucun crochetage n'est affiché, il se réduit à une petite
+mention « crochetage prêt » : rien ne gêne la partie.
 
 <p align="center"><img src="docs/overlay.png" alt="L'overlay sur l'anneau : vise, appui, crocheté" width="100%"></p>
 
@@ -197,10 +203,12 @@ Réglage `overlay` dans `config.json`. La simulation l'affiche aussi (`--sans-ov
 ### Résultats des tests
 | Test | Résultat |
 |---|---|
-| Simulation de vol de véhicule et de porte (trafic, gyrophares, pluie), 4 min | **51 / 51** crochetages, **240 / 240** checks, 0 appui en trop |
-| Cas piège : même lettre et même barre deux fois de suite | **45 / 45** checks |
-| Où tombe l'appui dans la barre (cible 35 %) | **34 % ± 3 %** |
-| Le bot sait-il s'il a réussi ? | d'accord avec la vérité sur **51 / 51** crochetages |
+| Simulation de vol de véhicule et de porte (trafic, gyrophares, pluie), 4 min | **49 / 49** crochetages, **226 / 226** checks, 0 appui en trop |
+| Cas piège : même lettre et même barre deux fois de suite, dont 16 en fin de tour | **42 / 42** checks |
+| Rejeu hors ligne des 19 sessions de simulation enregistrées | **2 380 / 2 380** checks |
+| Où tombe l'appui dans la barre (cible 35 %) | **33 % ± 3 %** |
+| Écart entre l'appui prévu et l'appui réel | **0,9 ms** d'écart-type, pire cas 4,9 ms |
+| Le bot sait-il s'il a réussi ? | d'accord avec la vérité sur **49 / 49** crochetages |
 | Détection du cercle sur 200 scènes générées (nuit, voitures bleues/rouges collées) | **192 / 200**, centre à < 1 px |
 | Vraie capture du jeu | cercle, barre et aiguille trouvés au pixel près |
 
@@ -212,7 +220,7 @@ Tout est noté, de A à Z, dans le dossier `logs/` (un événement JSON par lign
 
 | Fichier | Contenu |
 |---|---|
-| `moteur_<date>.jsonl` | en jeu : chaque crochetage, chaque check, chaque appui (position prévue dans la barre, vitesse, âge de l'image), chaque image où la barre a été perdue et pourquoi |
+| `moteur_<date>.jsonl` | en jeu : chaque crochetage, chaque check, chaque appui (position prévue dans la barre, vitesse, âge de l'image), chaque image où la barre a été perdue et pourquoi ; les crochetages que tu fais toi-même sont notés à part |
 | `sim_verite_<date>.jsonl` | en simulation : ce qui s'est vraiment passé, au degré près (où était l'aiguille quand la touche est arrivée) |
 | `sim_moteur_<date>.jsonl` | en simulation : ce que le bot a vu et décidé |
 | `captures/` | les images vues par le bot pendant chaque check raté |
@@ -228,9 +236,9 @@ Le rapport donne les résultats, la précision (histogramme de la position des a
 chaque raté, et **les réglages à changer** :
 
 ```
-[rapport] Crochetages 47/47 · checks 221/221
-[rapport] Appui à 34 % de la barre en moyenne (± 3 %)
-[rapport] Anticipation : la touche arrive en moyenne 4.3 ms plus tôt que prévu → latence_ms 8 → 4.
+[rapport] Crochetages 49/49 · checks 226/226
+[rapport] Appui à 33 % de la barre en moyenne, ± 3 %
+[rapport] Anticipation : la touche arrive en moyenne 3.0 ms plus tôt que prévu → latence_ms 8 → 5.
 ```
 
 ---
@@ -279,6 +287,9 @@ python simulation.py --scene porte       # seulement des portes (vehicule / port
 python simulation.py --vitesse 1.5       # aiguille 1.5x plus rapide
 python simulation.py --sans-bot          # pour jouer toi-même
 python simulation.py --duree 300         # s'arrête tout seul après 5 min
+python simulation.py --meme-check 0.3    # 30 % des checks reprennent la lettre et la barre du précédent
+python simulation.py --barres-tardives 0.3   # 30 % des barres en fin de tour, après 290°
+python simulation.py --sans-overlay      # sans l'overlay sur l'anneau
 ```
 
 ## 🔧 Réglages et dépannage

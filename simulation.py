@@ -296,7 +296,8 @@ class Simulation:
         diff = random.choice(list(DIFFICULTES)) if self.args.difficulte == "mix" else self.args.difficulte
         lmin, lmax, vit = DIFFICULTES[diff]
         larg = random.uniform(lmin, lmax)
-        debut = random.uniform(100, 340 - larg)
+        bas = 290 if random.random() < self.args.barres_tardives else 100
+        debut = random.uniform(bas, 340 - larg)
         return {"diff": diff, "lettre": random.choice(self.args.lettres), "debut": debut,
                 "fin": debut + larg, "vit": vit * self.args.vitesse}
 
@@ -351,7 +352,7 @@ class Simulation:
                     pos=round(pos, 4), vit=ck["vit"], diff=ck["diff"])
         if touche != ck["lettre"]:
             self.j.ev("touche", resultat="mauvaise touche", **base)
-            return self.echec(f"mauvaise touche {touche} (c'était {ck['lettre']})", "mauvaise touche")
+            return self.echec(f"mauvaise touche {touche} au lieu de {ck['lettre']}", "mauvaise touche")
         if p < ck["debut"]:
             self.j.ev("touche", resultat="trop tôt", ecart_deg=round(ck["debut"] - p, 2), **base)
             return self.echec(f"{touche} trop tôt de {ck['debut'] - p:.0f}°", "trop tôt")
@@ -447,7 +448,7 @@ class Simulation:
     def maj_hud(self):
         st = self.stats
         m = self.moteur
-        bot = "désactivé (--sans-bot)" if self.args.sans_bot else (
+        bot = "désactivé par --sans-bot" if self.args.sans_bot else (
             "démarrage..." if m is None else ("ACTIF" if m.actif else "en pause"))
         taux = f"{100 * st['cycles_ok'] / st['cycles']:.0f} %" if st["cycles"] else "-"
         diffs = "  ".join(f"{d[:3]} {100 * c['ok'] / (c['ok'] + c['rate']):.0f}%" if c["ok"] + c["rate"] else f"{d[:3]} -"
@@ -455,7 +456,7 @@ class Simulation:
         lignes = [
             f"Bot          {bot}",
             f"Checks       {st['ok']} réussis · {st['rate']} ratés",
-            f"Crochetages  {st['cycles_ok']} / {st['cycles']}  ({taux})",
+            f"Crochetages  {st['cycles_ok']} / {st['cycles']}  ·  {taux}",
             f"Par diff.    {diffs}",
             f"Fluidité     {self.fps_affiche:4.0f} img/s",
             f"Journal      logs/sim_*_{self.stamp}",
@@ -490,7 +491,7 @@ class Simulation:
                 self.j.ev("touche", resultat="aucune", cycle=self.n_cycle, n=self.i + 1, attendu=self.ck["lettre"],
                           debut=round(self.ck["debut"], 2), fin=round(self.ck["fin"], 2), vit=self.ck["vit"],
                           diff=self.ck["diff"])
-                self.echec("aucun appui (tour complet)", "aucun appui")
+                self.echec("aucun appui, tour complet", "aucun appui")
             else:
                 self.placer_aiguille(p)
         elif maintenant >= self.t_suivant:
@@ -534,14 +535,15 @@ class Simulation:
         print(f"\n[sim] Bilan : {st['ok']} checks réussis, {st['rate']} ratés, "
               f"{st['cycles_ok']}/{st['cycles']} crochetages réussis")
         if self.moteur:
-            print(f"[sim] Le bot a compté {self.moteur.nb_reussis} check(s) réussi(s) sur {self.moteur.nb_appuis} appui(s), "
-                  f"{self.moteur.nb_crochetages} crochetage(s)")
+            print(f"[sim] Le bot a compté {at.pluriel(self.moteur.nb_reussis, 'check réussi', 'checks réussis')} "
+                  f"sur {at.pluriel(self.moteur.nb_appuis, 'appui')}, "
+                  f"{at.pluriel(self.moteur.nb_crochetages, 'crochetage')}")
             self.moteur.arreter()
             if self.thread_bot:
                 self.thread_bot.join(timeout=2.0)
         if self.nb_ticks:
             print(f"[sim] Fluidité : {self.nb_ticks / max(duree, 1e-6):.0f} images/s, pire saccade {self.dt_max * 1000:.0f} ms, "
-                  f"{self.nb_lents} saccade(s) > 25 ms")
+                  f"{at.pluriel(self.nb_lents, 'saccade')} > 25 ms")
         self.j.ev("sim_fin", duree_s=round(duree, 1), stats=dict(st),
                   par_difficulte={d: dict(c) for d, c in self.par_diff.items()},
                   images_par_s=round(self.nb_ticks / max(duree, 1e-6), 1), pire_saccade_ms=round(self.dt_max * 1000, 1))
@@ -621,7 +623,7 @@ class Simulation:
                     at.ecrire_image(os.path.join(at.TEMPLATES_DIR, f"{lt}.png"), at.rogner_modele(crop))
         self.montrer(False)
         self.message("")
-        print(f"[sim] {len(a_faire)} lettre(s) apprise(s) dans {at.dossier_modeles()}/")
+        print(f"[sim] {at.pluriel(len(a_faire), 'lettre apprise', 'lettres apprises')} dans {at.dossier_modeles()}/")
         return cfg
 
     def demarrer_bot(self, cfg):
@@ -664,21 +666,23 @@ class Simulation:
 
 def main(argv=None):
     global APP
-    p = argparse.ArgumentParser(description="Simulation de crochetage (style serveur RP) pour entraîner et tester le bot.")
+    p = argparse.ArgumentParser(description="Simulation de crochetage façon serveur RP, pour entraîner et tester le bot.")
     p.add_argument("--fenetre", action="store_true", help="dans une fenêtre au lieu du plein écran")
-    p.add_argument("--sans-bot", action="store_true", help="ne lance pas le bot (pour jouer toi-même)")
-    p.add_argument("--bot-pause", action="store_true", help="le bot démarre en pause (F6 pour l'activer)")
+    p.add_argument("--sans-bot", action="store_true", help="ne lance pas le bot, pour jouer toi-même")
+    p.add_argument("--bot-pause", action="store_true", help="le bot démarre en pause, F6 pour l'activer")
     p.add_argument("--sans-overlay", action="store_true", help="n'affiche pas l'overlay du bot sur l'anneau")
     p.add_argument("--debug", action="store_true", help="infos de détection du bot en direct dans la console")
     p.add_argument("--scene", default="mix", choices=["mix", "vehicule", "porte"], help="ce qu'on crochète")
     p.add_argument("--difficulte", default="mix", choices=list(DIFFICULTES) + ["mix"])
     p.add_argument("--vitesse", type=float, default=1.0, help="multiplie la vitesse de l'aiguille")
-    p.add_argument("--taille", type=int, default=0, help="diamètre du cercle en pixels (défaut : comme le jeu)")
+    p.add_argument("--taille", type=int, default=0, help="diamètre du cercle en pixels, par défaut celui du jeu")
     p.add_argument("--lettres", default="AZERTYQSDFGHWXCVBNKLMPUIOJ", help="lettres possibles")
+    p.add_argument("--barres-tardives", type=float, default=0.0,
+                   help="probabilité d'une barre en fin de tour, après 290°")
     p.add_argument("--meme-check", type=float, default=0.0,
-                   help="probabilité qu'un check reprenne la lettre et la barre du précédent (cas piège)")
-    p.add_argument("--nb", type=int, default=0, help="checks par cycle (0 = au hasard : 4-6 véhicule, 3-5 porte)")
-    p.add_argument("--pause-fin", type=float, default=1.2, help="pause entre 2 crochetages (s)")
+                   help="probabilité qu'un check reprenne la lettre et la barre du précédent, cas piège")
+    p.add_argument("--nb", type=int, default=0, help="checks par cycle, 0 pour 4 à 6 sur un véhicule et 3 à 5 sur une porte")
+    p.add_argument("--pause-fin", type=float, default=1.2, help="pause entre 2 crochetages, en secondes")
     p.add_argument("--duree", type=float, default=0, help="quitte tout seul après N secondes")
     args = p.parse_args(argv)
     args.lettres = "".join(dict.fromkeys(c for c in args.lettres.upper() if c.isalnum()))

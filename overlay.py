@@ -81,7 +81,9 @@ class OverlayAnneau:
         self.i_box_l = c.create_rectangle(0, 0, 0, 0, fill=FOND, outline=GRIS2)
         self.i_lettre = c.create_text(0, 0, text="", fill=BLANC, font=(POLICE, -round(19 * f), "bold"))
         self.i_box_e = c.create_rectangle(0, 0, 0, 0, fill=FOND, outline=GRIS2)
-        self.i_etat = c.create_text(0, 0, text="", fill=BLANC, font=(POLICE, -round(16 * f), "bold"))
+        self.police_etat = (POLICE, -round(16 * f), "bold")
+        self.police_repos = (POLICE, -round(11 * f), "bold")
+        self.i_etat = c.create_text(0, 0, text="", fill=BLANC, font=self.police_etat)
         self.i_detail = c.create_text(0, 0, text="", fill=GRIS, font=(POLICE, -round(12 * f)))
         self.mesures = (self.i_arc, self.i_fen, self.i_b1, self.i_b2, self.i_cible, self.i_pred, self.i_pt, self.i_aig)
         for it in (self.i_ext, self.i_int, self.i_flash, self.i_box_l, self.i_box_e, *self.mesures):
@@ -153,16 +155,6 @@ class OverlayAnneau:
             self.erreur = traceback.format_exc()
         self.top.after(self.periode, self._tick)
 
-    def fenetre_appui(self, dec, debut, fin):
-        larg = fin - debut
-        m = min(dec.marge, larg * 0.25)
-        entree = max(m, dec.cible * larg)
-        if dec.vit is None or abs(dec.vit) < 1:
-            return debut + m, fin - m
-        if dec.vit > 0:
-            return debut + entree, fin - m
-        return debut + m, fin - entree
-
     def maj(self):
         m = self.moteur_fn()
         if m is None or not self.visible_fn(m):
@@ -214,9 +206,9 @@ class OverlayAnneau:
             self.c.coords(self.i_aig, *self._pt(centre + rel, r0), *self._pt(centre + rel, r_out + 16 * f))
             vise = dec is not None and m.actif and not dec.verrou
             if vise:
-                fen = self.fenetre_appui(dec, debut, fin)
+                fen = dec.fenetre(debut, fin)
                 if vit is not None and dec.prev is not None and now - dec.prev_t < 0.3:
-                    pred = rel + vit * (dec.lat + (now - dec.prev_t))
+                    pred = dec.prevision(centre, now)
             ok_fen = fen is not None and fen[1] > fen[0]
             self._etat(self.i_fen, ok_fen)
             self._etat(self.i_cible, ok_fen)
@@ -266,7 +258,8 @@ class OverlayAnneau:
         elif now - m.t_refus < 1.5:
             etat, coul, detail = "PAS ENVOYÉ", ORANGE, m.refus
         elif dc and now - dc["t"] < 3.0 and dc["resultat"] == "crocheté" and not cercle:
-            etat, coul = f"CROCHETÉ  ✓   {dc['nb_checks']} checks", VERT_OK
+            quoi = "CROCHETÉ  ✓" if dc.get("bot", True) else "CROCHETÉ À LA MAIN"
+            etat, coul = f"{quoi}   {dc['nb_checks']} checks", VERT_OK
         elif dc and now - dc["t"] < 3.0 and dc["resultat"] == "raté" and not cercle:
             etat, coul = f"RATÉ AU CHECK {dc['nb_checks']}", ROUGE
         elif cercle and vert:
@@ -291,14 +284,20 @@ class OverlayAnneau:
             morceaux = [f"check {n_check}"] if n_check else []
             if vit is not None:
                 morceaux.append(f"{'↻' if vit > 0 else '↺'} {abs(vit):.0f}°/s")
-            if pred is not None and fen is not None:
-                reste = (fen[0] - pred) if vit > 0 else (pred - fen[1])
-                morceaux.append("dans la fenêtre" if reste <= 0 else f"appui dans {reste:.0f}°")
+            if pred is not None and fen is not None and fen[1] > fen[0]:
+                if fen[0] <= pred <= fen[1]:
+                    morceaux.append("dans la fenêtre")
+                else:
+                    reste = ((fen[0] - pred) if vit > 0 else (pred - fen[1])) % 360.0
+                    morceaux.append(f"appui dans {reste:.0f}°")
             detail = "  ·  ".join(morceaux) if morceaux else compteurs
         else:
-            etat, coul = "PRÊT", GRIS
-            if m.fps:
-                detail = f"{compteurs}  ·  {m.fps:.0f} img/s"
-        self._conf(self.i_etat, text=etat, fill=coul)
+            etat, coul, detail = "CROCHETAGE PRÊT", GRIS2, ""
+        repos = not cercle and etat == "CROCHETAGE PRÊT"
+        self._conf(self.i_etat, text=etat, fill=coul, font=self.police_repos if repos else self.police_etat)
         self._conf(self.i_detail, text=detail)
-        self._boite(self.i_box_e, (self.i_etat, self.i_detail), coul, (etat, detail))
+        if repos:
+            self.cache.pop(("b", self.i_box_e), None)
+            self._etat(self.i_box_e, False)
+        else:
+            self._boite(self.i_box_e, (self.i_etat, self.i_detail), coul, (etat, detail))

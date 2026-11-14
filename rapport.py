@@ -47,6 +47,10 @@ def pct(a, b):
     return f"{100 * a / b:.1f} %" if b else "-"
 
 
+def pluriel(n, mot, forme_pluriel=None):
+    return f"{n} {mot if abs(n) < 2 else (forme_pluriel or mot + 's')}"
+
+
 def moy(xs):
     return stats.fmean(xs) if xs else float("nan")
 
@@ -175,39 +179,39 @@ def recommandations(r):
             rec.append(f"**Anticipation** : la touche arrive en moyenne {abs(e):.1f} ms {sens} que prévu → "
                        f"`latence_ms` {lat} → **{max(0, round(lat + e))}**.")
         else:
-            rec.append(f"**Anticipation** : bien calée (écart moyen {e:+.1f} ms), `latence_ms` = {lat} est bon.")
+            rec.append(f"**Anticipation** : bien calée, écart moyen {e:+.1f} ms : `latence_ms` = {lat} est bon.")
     pos = r["positions"]
     if len(pos) >= 10 and cible is not None:
         m, sd = moy(pos), ecart(pos)
         tot, tard = r["types_rates"]["trop tôt"], r["types_rates"]["trop tard"]
-        rec.append(f"**Où viser** : appuis à {m * 100:.0f} % de la barre en moyenne (cible {cible * 100:.0f} %), "
+        rec.append(f"**Où viser** : appuis à {m * 100:.0f} % de la barre en moyenne, cible {cible * 100:.0f} %, "
                    f"dispersion ± {sd * 100:.0f} %.")
         if tard > tot and m > cible + 0.05:
-            rec.append(f"Plus de ratés « trop tard » ({tard}) que « trop tôt » ({tot}) : baisser `cible` à "
+            rec.append(f"Plus de ratés « trop tard », {tard}, que « trop tôt », {tot} : baisser `cible` à "
                        f"**{max(0.15, round(cible - 0.05, 2))}** ou monter `latence_ms`.")
         elif tot > tard and m < cible - 0.05:
-            rec.append(f"Plus de ratés « trop tôt » ({tot}) que « trop tard » ({tard}) : monter `cible` à "
+            rec.append(f"Plus de ratés « trop tôt », {tot}, que « trop tard », {tard} : monter `cible` à "
                        f"**{min(0.5, round(cible + 0.05, 2))}**.")
     nb_bloques = sum(1 for a in r["par"]["m_appui"] if not a.get("envoye"))
     if r["types_rates"]["aucun appui"] > nb_bloques:
-        top = ", ".join(f"{k} ({v})" for k, v in r["pertes"].most_common(3)) or "aucune"
-        rec.append(f"**{r['types_rates']['aucun appui']} check(s) sans appui** : le bot a perdu la barre ou l'aiguille. "
+        top = ", ".join(f"{k} ×{v}" for k, v in r["pertes"].most_common(3)) or "aucune"
+        rec.append(f"**{pluriel(r['types_rates']['aucun appui'], 'check')} sans appui** : le bot a perdu la barre ou l'aiguille. "
                    f"Pertes de détection les plus fréquentes : {top}. Voir les captures dans `logs/captures/`.")
     if r["types_rates"]["mauvaise touche"]:
-        rec.append(f"**{r['types_rates']['mauvaise touche']} mauvaise(s) lettre(s)** : monter `seuil` "
-                   f"(actuel {cfg.get('seuil')}) ou réapprendre les lettres (F8).")
+        rec.append(f"**{pluriel(r['types_rates']['mauvaise touche'], 'mauvaise lettre', 'mauvaises lettres')}** : monter `seuil` "
+                   f"actuel {cfg.get('seuil')}, ou réapprendre les lettres avec F8.")
     sm = r["scores_min"]
     if sm and cfg.get("seuil") is not None and min(sm) < cfg["seuil"] + 0.08:
-        rec.append(f"Une lettre a été reconnue de justesse (score mini {min(sm):.2f}, seuil {cfg['seuil']}) : "
+        rec.append(f"Une lettre a été reconnue de justesse, score mini {min(sm):.2f} pour un seuil de {cfg['seuil']} : "
                    f"réapprendre cette lettre la rendra plus sûre.")
     if r["hors_check"]:
-        rec.append(f"**{len(r['hors_check'])} appui(s) en trop** (hors d'un check) : à corriger dans le moteur.")
+        rec.append(f"**{pluriel(len(r['hors_check']), 'appui')} en trop**, hors d'un check : à corriger dans le moteur.")
     bloques = [a for a in r["par"]["m_appui"] if not a.get("envoye")]
     if bloques:
         raisons = Counter(a.get("raison", "?") for a in bloques)
-        rec.append(f"**{len(bloques)} appui(s) bloqué(s) par sécurité** (le jeu n'était pas au premier plan) : "
+        rec.append(f"**{pluriel(len(bloques), 'appui bloqué', 'appuis bloqués')} par sécurité**, le jeu n'était pas au premier plan : "
                    + ", ".join(f"{k} ×{v}" for k, v in raisons.most_common(3))
-                   + f". Ce n'est pas une erreur du moteur ; vérifie `fenetre_cible` ({cfg.get('fenetre_cible')}).")
+                   + f". Ce n'est pas une erreur du moteur ; vérifie `fenetre_cible`, actuellement {cfg.get('fenetre_cible')}.")
     mauvais = {k: v for k, v in r["accord"].items() if k not in ("d'accord",)}
     if mauvais:
         rec.append("Le moteur s'est trompé sur l'issue de certains crochetages : "
@@ -243,11 +247,11 @@ def generer(stamp=None, jeu=False):
         nchk = r["checks_ok"] + r["checks_rates"]
         L.append("| | |")
         L.append("|---|---|")
-        L.append(f"| Crochetages réussis | **{ok} / {len(cyc)}** ({pct(ok, len(cyc))}) |")
-        L.append(f"| Checks réussis | **{r['checks_ok']} / {nchk}** ({pct(r['checks_ok'], nchk)}) |")
+        L.append(f"| Crochetages réussis | **{ok} / {len(cyc)}** · {pct(ok, len(cyc))} |")
+        L.append(f"| Checks réussis | **{r['checks_ok']} / {nchk}** · {pct(r['checks_ok'], nchk)} |")
         for t, n in r["types_rates"].most_common():
             L.append(f"| Ratés « {t} » | {n} |")
-        L.append(f"| Appuis en trop (hors check) | {len(r['hors_check'])} |")
+        L.append(f"| Appuis en trop, hors check | {len(r['hors_check'])} |")
         fin = r["sim_fin"]
         if fin:
             L.append(f"| Durée | {fin.get('duree_s')} s |")
@@ -259,12 +263,12 @@ def generer(stamp=None, jeu=False):
         L.append("|---|---|")
         for d in ("facile", "moyen", "dur"):
             c = r["par_diff"].get(d, Counter())
-            L.append(f"| {d} | {c['ok']} / {c['ok'] + c['raté']} ({pct(c['ok'], c['ok'] + c['raté'])}) |")
+            L.append(f"| {d} | {c['ok']} / {c['ok'] + c['raté']} · {pct(c['ok'], c['ok'] + c['raté'])} |")
         L.append("")
         L.append("| Scène | Crochetages réussis |")
         L.append("|---|---|")
         for sc_, c in sorted(r["par_scene"].items()):
-            L.append(f"| {sc_} | {c['ok']} / {c['ok'] + c['raté']} ({pct(c['ok'], c['ok'] + c['raté'])}) |")
+            L.append(f"| {sc_} | {c['ok']} / {c['ok'] + c['raté']} · {pct(c['ok'], c['ok'] + c['raté'])} |")
         L.append("")
     else:
         mc = r["m_cycles"]
@@ -286,7 +290,7 @@ def generer(stamp=None, jeu=False):
     if pos:
         L.append("## Précision : où tombe l'appui dans la barre")
         L.append("")
-        L.append(f"Position réelle de l'aiguille quand le jeu reçoit la touche (0 % = entrée de la barre, 100 % = sortie). "
+        L.append(f"Position réelle de l'aiguille quand le jeu reçoit la touche : 0 % à l'entrée de la barre, 100 % à la sortie. "
                  f"Moyenne **{moy(pos) * 100:.1f} %**, écart-type {ecart(pos) * 100:.1f} %, "
                  f"5 % des appuis sous {quantile(pos, 0.05) * 100:.0f} %, 5 % au-dessus de {quantile(pos, 0.95) * 100:.0f} %.")
         L.append("")
@@ -311,13 +315,13 @@ def generer(stamp=None, jeu=False):
         L.append("")
         L.append("| | moyenne | écart-type | mini | maxi |")
         L.append("|---|---|---|---|---|")
-        for nom, cle, f in (("Délai décision → touche reçue (ms)", "delai_ms", 1), ("Écart position réelle − prévue (% barre)", "err_pos", 100),
-                            ("Même écart en temps (ms)", "err_ms", 1), ("Âge de l'image au moment de décider (ms)", "age_ms", 1)):
+        for nom, cle, f in (("Délai décision → touche reçue, en ms", "delai_ms", 1), ("Écart position réelle − prévue, en % de la barre", "err_pos", 100),
+                            ("Même écart en temps, en ms", "err_ms", 1), ("Âge de l'image au moment de décider, en ms", "age_ms", 1)):
             xs = [c[cle] * f for c in cal]
             L.append(f"| {nom} | {moy(xs):+.1f} | {ecart(xs):.1f} | {min(xs):+.1f} | {max(xs):+.1f} |")
         dl = [c["larg_mes"] - c["larg_vraie"] for c in cal if c["larg_mes"] is not None]
         if dl:
-            L.append(f"| Largeur de barre mesurée − vraie (°) | {moy(dl):+.1f} | {ecart(dl):.1f} | {min(dl):+.1f} | {max(dl):+.1f} |")
+            L.append(f"| Largeur de barre mesurée − vraie, en ° | {moy(dl):+.1f} | {ecart(dl):.1f} | {min(dl):+.1f} | {max(dl):+.1f} |")
         L.append("")
 
     if r["images"]:
@@ -334,13 +338,13 @@ def generer(stamp=None, jeu=False):
         if r["scores_min"]:
             L.append("")
             L.append(f"Reconnaissance des lettres : score le plus bas {min(r['scores_min']):.2f} "
-                     f"(moyenne des minimums {moy(r['scores_min']):.2f}).")
+                     f", moyenne des minimums {moy(r['scores_min']):.2f}.")
         L.append("")
 
     if r["accord"]:
         L.append("## Le bot sait-il s'il a réussi ?")
         L.append("")
-        L.append("Le bot déduit l'issue tout seul (check suivant apparu, barre verte, cercle disparu). "
+        L.append("Le bot déduit l'issue tout seul : check suivant apparu, barre verte ou cercle disparu. "
                  "Comparaison avec la vérité, crochetage par crochetage :")
         L.append("")
         for k, v in r["accord"].most_common():
@@ -367,9 +371,9 @@ def generer(stamp=None, jeu=False):
     elif not r["verite"]:
         rm = [e for e in r["m_checks"] if str(e.get("resultat", "")).startswith("raté")]
         if rm:
-            L.append("## Chaque raté (vu par le bot)")
+            L.append("## Chaque raté, vu par le bot")
             L.append("")
-            L.append("| Cycle | Check | Lettre | Barre (°) | Vitesse (°/s) | Visé à | Images avec barre | Pertes |")
+            L.append("| Cycle | Check | Lettre | Barre en ° | Vitesse en °/s | Visé à | Images avec barre | Pertes |")
             L.append("|---|---|---|---|---|---|---|---|")
             for e in rm[:60]:
                 a = e.get("appui") or {}
@@ -381,7 +385,7 @@ def generer(stamp=None, jeu=False):
 
     caps = r["par"]["v_capture"] + r["par"]["m_captures"]
     if caps:
-        L.append(f"Images des ratés : `logs/captures/` ({len(caps)} raté(s) capturé(s)).")
+        L.append(f"Images des ratés : `logs/captures/`, {pluriel(len(caps), 'raté capturé', 'ratés capturés')}.")
         L.append("")
 
     L.append("## Recommandations")
@@ -403,7 +407,7 @@ def generer(stamp=None, jeu=False):
         res.append(f"[rapport] Crochetages {ok}/{len(cyc)} · checks {r['checks_ok']}/{r['checks_ok'] + r['checks_rates']}"
                    + (" · ratés : " + ", ".join(f"{k} {v}" for k, v in r["types_rates"].items()) if r["types_rates"] else ""))
     if pos:
-        res.append(f"[rapport] Appui à {moy(pos) * 100:.0f} % de la barre en moyenne (± {ecart(pos) * 100:.0f} %)")
+        res.append(f"[rapport] Appui à {moy(pos) * 100:.0f} % de la barre en moyenne, ± {ecart(pos) * 100:.0f} %")
     for x in rec:
         res.append("[rapport] " + x.replace("**", "").replace("`", ""))
     return chemin, "\n".join(res)
@@ -411,8 +415,8 @@ def generer(stamp=None, jeu=False):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description="Rapport d'analyse des journaux de Crochetage.")
-    p.add_argument("stamp", nargs="?", help="horodatage AAAAMMJJ_HHMMSS (défaut : la dernière session)")
-    p.add_argument("--jeu", action="store_true", help="dernière session en jeu (pas la simulation)")
+    p.add_argument("stamp", nargs="?", help="horodatage AAAAMMJJ_HHMMSS, par défaut la dernière session")
+    p.add_argument("--jeu", action="store_true", help="dernière session en jeu, hors simulation")
     a = p.parse_args(argv)
     try:
         chemin, resume = generer(a.stamp, a.jeu)

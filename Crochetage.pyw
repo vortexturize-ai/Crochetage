@@ -297,6 +297,9 @@ class App:
             ancien.arreter()
             if actif is None:
                 actif = ancien.actif
+            fil = getattr(self, "fil_moteur", None)
+            if fil is not None:
+                fil.join(timeout=2.0)
         m = at.Moteur(self.cfg, log=self.noter, actif=bool(actif), touche_quitter=False)
         if ancien:
             m.nb_appuis, m.nb_reussis = ancien.nb_appuis, ancien.nb_reussis
@@ -310,7 +313,8 @@ class App:
             except Exception:
                 self.noter("ERREUR du bot : " + traceback.format_exc().strip().splitlines()[-1])
 
-        threading.Thread(target=run, daemon=True).start()
+        self.fil_moteur = threading.Thread(target=run, daemon=True)
+        self.fil_moteur.start()
 
     def basculer(self):
         self.moteur.basculer()
@@ -325,9 +329,9 @@ class App:
         self.img_on, self.img_off = icone(True), icone(False)
         menu = pystray.Menu(
             pystray.MenuItem("Ouvrir Crochetage", lambda: self.q.put("ouvrir"), default=True),
-            pystray.MenuItem(lambda it: "Mettre en pause  (F6)" if self.moteur.actif else "Activer  (F6)",
+            pystray.MenuItem(lambda it: "Mettre en pause  ·  F6" if self.moteur.actif else "Activer  ·  F6",
                              lambda: self.q.put("basculer")),
-            pystray.MenuItem("Détecter le cercle  (F7)", lambda: self.q.put("detecter")),
+            pystray.MenuItem("Détecter le cercle  ·  F7", lambda: self.q.put("detecter")),
             pystray.MenuItem("Lancer la simulation", lambda: self.q.put("simulation")),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Quitter", lambda: self.q.put("quitter")),
@@ -457,7 +461,7 @@ class App:
         self.it_lettres = carte.create_text(lc - px(18), px(30), anchor="e", font=self.police(12, True),
                                             fill=ROUGE_CLAIR, text="")
         carte.tag_bind(self.it_lettres, "<ButtonRelease-1>", lambda e: self.afficher("lettres"))
-        self.b_detecter = Bouton(carte, "Détecter le cercle  (F7)", self.detecter, lc - px(36), px(40), self.f,
+        self.b_detecter = Bouton(carte, "Détecter le cercle  ·  F7", self.detecter, lc - px(36), px(40), self.f,
                                  style="secondaire", taille=13)
         carte.create_window(px(18), px(132), anchor="nw", window=self.b_detecter)
         self.b_actif = Bouton(carte, "Activer", self.basculer, lc - px(36), px(52), self.f, taille=16)
@@ -504,7 +508,7 @@ class App:
             e.bind("<FocusOut>", lambda ev: (e.get().strip() or None) != self.cfg.get("fenetre_cible")
                    and self.reglage("fenetre_cible", e.get().strip() or None))
             return e
-        bloc("Fenêtre du jeu", "N'appuie que si cette fenêtre est devant (vide = partout)", fenetre)
+        bloc("Fenêtre du jeu", "N'appuie que si cette fenêtre est devant, vide pour toutes", fenetre)
 
         def ligne_inter(titre, valeur, cmd):
             c = tk.Canvas(v, width=lc, height=px(42), bg=FOND, highlightthickness=0)
@@ -542,7 +546,7 @@ class App:
         fichiers = at.lettres_a_nommer()[:5]
         tk.Label(v, text="Lettres vues mais pas encore connues", bg=FOND, fg=TEXTE, font=self.police(14, True)
                  ).pack(anchor="w", padx=px(16), pady=(px(12), 0))
-        tk.Label(v, text="Tape la lettre affichée puis Entrée (vide = jeter).", bg=FOND, fg=TEXTE3,
+        tk.Label(v, text="Tape la lettre affichée puis Entrée, ou laisse vide pour jeter l'image.", bg=FOND, fg=TEXTE3,
                  font=self.police(11)).pack(anchor="w", padx=px(16), pady=(px(2), px(4)))
         self._photos_lettres = []
         if not fichiers:
@@ -661,7 +665,7 @@ class App:
         dernier = (m.dernier or (self.journal[-1] if self.journal else "")).split("] ", 1)[-1]
         self.carte.itemconfigure(self.it_journal, text=dernier if len(dernier) <= 46 else dernier[:45] + "…")
         self.carte.itemconfigure(self.it_lettres, text=f"{nb_inconnues} à nommer ›" if nb_inconnues else "")
-        self.b_actif.changer("Mettre en pause  (F6)" if actif else "Activer  (F6)",
+        self.b_actif.changer("Mettre en pause  ·  F6" if actif else "Activer  ·  F6",
                              "contour" if actif else "primaire")
         self.maj_apercu()
 
