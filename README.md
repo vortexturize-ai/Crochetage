@@ -210,8 +210,11 @@ Réglage `overlay` dans `config.json`. La simulation l'affiche aussi (`--sans-ov
   la barre passe au vert), le bot enregistre l'image comme modèle.
 - Ou **F8** puis la lettre, ou bien en tapant la lettre dans l'appli (« à nommer »).
 
-Les lettres s'apprennent **en jeu** : la police de Baylife n'est pas celle de la simulation. Tant
-qu'une lettre est inconnue, le bot ne la joue pas et garde son image dans `templates/a_renommer/`.
+**Lettres de base** : `lettres_base/` contient A, Z, E, R, Q, S, D et F dessinées dans une police très
+proche de celle de Baylife. Sur les vraies lettres du jeu, elles donnent A 0,965, Z 0,926, E 0,889 et
+R 0,94, pour un seuil de 0,75 : le bot joue dès le premier crochetage. Les lettres apprises en jeu
+s'ajoutent à celles-là. Une lettre hors de la liste reste inconnue : le bot ne la joue pas et garde son
+image dans `templates/a_renommer/`.
 
 ### Résultats des tests
 | Test | Résultat |
@@ -226,7 +229,8 @@ qu'une lettre est inconnue, le bot ne la joue pas et garde son image dans `templ
 | Vraie capture du jeu | cercle, barre et aiguille trouvés au pixel près |
 | Détection sur 26 scènes : vraie capture, leurres rouges en mouvement, décors de la simulation | centre à **0 px** en médiane, **1,6 px** au pire |
 | Faux cercles de 195 px trouvés avant sur Baylife | rejetés : anneau noir sur 24 à 32 % du tour seulement |
-| En jeu sur Baylife, zone de base | anneau et barre lus sur **144 / 144** images, lettre inconnue gardée pour l'apprendre |
+| En jeu sur Baylife, zone de base | **4 / 4** appuis réussis, A, A, Z, Z, à 35 % de la barre en moyenne |
+| Vraies lettres E et R du jeu, avec les seules lettres de base | reconnues, 0,889 et 0,94 |
 
 ---
 
@@ -272,8 +276,8 @@ chaque raté, et **les réglages à changer** :
    logo apparaît près de l'horloge (sinon, regarde dans la flèche `^`). Il est rouge quand le bot est
    actif, gris en pause. Un nouveau clic sur le lanceur ouvre la fenêtre de l'appli.
 2. Mets le jeu en **fenêtré sans bordure** (en plein écran exclusif, la capture d'écran sort noire).
-3. Rien à régler : la zone se place toute seule sur l'anneau, au centre de l'écran. Au premier
-   passage de chaque lettre, joue-la toi-même ou nomme-la dans l'appli pour que le bot l'apprenne.
+3. Rien à régler : la zone se place toute seule sur l'anneau, au centre de l'écran, et les lettres
+   A, Z, E, R, Q, S, D et F sont déjà connues.
 4. Appuie sur **F6** pour activer ou mettre en pause.
 
 | Touche | Action |
@@ -327,7 +331,8 @@ python simulation.py --sans-overlay      # sans l'overlay sur l'anneau
 | **Démarrer avec Windows** | Lance l'appli à l'ouverture de session. |
 
 Dans `config.json` : `serveur_cible` (`bay.life` par défaut, vide = tous les serveurs), `zone_jeu`
-(zone de base sur l'anneau de Baylife, oui par défaut), `overlay` (oui par défaut), `capture` (`auto` par défaut, `dxgi` ou `mss`), `journal` (journal détaillé, oui par défaut) et
+(zone de base sur l'anneau de Baylife, oui par défaut), `appui_ms` (50 ms : le jeu tourne parfois à
+30 images/s et un appui plus court peut tomber entre deux images), `overlay` (oui par défaut), `capture` (`auto` par défaut, `dxgi` ou `mss`), `journal` (journal détaillé, oui par défaut) et
 `captures_echec` (images des ratés, oui par défaut).
 
 - **« Cercle pas trouvé »** : refais F7 pendant que l'aiguille tourne. La zone de base reste en place.
@@ -348,6 +353,7 @@ Dans `config.json` : `serveur_cible` (`bay.life` par défaut, vide = tous les se
 | [`simulation.py`](simulation.py) | la simulation d'entraînement |
 | [`scene.py`](scene.py) | les décors de la simulation (rue de nuit, véhicule, porte, mini-carte) |
 | [`rapport.py`](rapport.py) | le rapport d'analyse des journaux |
+| [`lettres_base/`](lettres_base) | les lettres de base, reconnues sans apprentissage |
 | [`raccourcis.py`](raccourcis.py) | crée l'icône `crochetage.ico` et le lanceur sur le Bureau et dans le menu Démarrer |
 | [`logo.png`](logo.png), `crochetage.ico` | le logo de l'appli et l'icône du lanceur |
 | `config.json`, `templates/`, `logs/` | créés au premier lancement : tes réglages, tes lettres apprises, tes journaux (non versionnés) |

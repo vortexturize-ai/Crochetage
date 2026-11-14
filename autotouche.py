@@ -22,6 +22,7 @@ VERSION = "2.0"
 BASE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE, "config.json")
 TEMPLATES_DIR = os.path.join(BASE, "templates")
+LETTRES_BASE = os.path.join(BASE, "lettres_base")
 A_RENOMMER = "a_renommer"
 
 
@@ -41,7 +42,7 @@ DEFAULT_CONFIG = {
     "attendre_barre": True,
     "touche_fixe": None,
     "seuil": 0.75,
-    "appui_ms": 20,
+    "appui_ms": 50,
     "latence_ms": 25,
     "cible": 0.35,
     "marge_deg": 3,
@@ -306,6 +307,25 @@ def charger_modeles(cfg, taille_max, log=print):
             log(f"  ! {f} ignoré : plus grand que la zone de la lettre, à réapprendre après un changement de zone")
             continue
         modeles.append((nom, VK[nom], pretraiter(img, cfg), f))
+    if cfg.get("zone_jeu", True):
+        modeles += lettres_base(cfg, taille_max)
+    return modeles
+
+
+def lettres_base(cfg, taille_max):
+    if not os.path.isdir(LETTRES_BASE):
+        return []
+    c = min(taille_max)
+    cote = c - 2 * max(2, int(round(c * 0.12)))
+    modeles = []
+    for f in sorted(os.listdir(LETTRES_BASE)):
+        nom = nom_touche_depuis_fichier(f)
+        img = lire_image(os.path.join(LETTRES_BASE, f)) if f.lower().endswith(".png") else None
+        if img is None or nom not in VK or cote < 6:
+            continue
+        if img.shape[:2] != (cote, cote):
+            img = cv2.resize(img, (cote, cote), interpolation=cv2.INTER_AREA if cote < img.shape[0] else cv2.INTER_CUBIC)
+        modeles.append((nom, VK[nom], pretraiter(img, cfg), f"base/{f}"))
     return modeles
 
 
@@ -1140,7 +1160,7 @@ class Suivi:
         self.fins = []
         self.stats = Counter()
 
-    def image(self, now, nom, score, barre, an, dec, vert):
+    def image(self, now, nom, score, barre, an, dec, vert, lettre_vue=True):
         self.fins = []
         visible = barre is not None or nom is not None or vert
         if not visible:
@@ -1173,6 +1193,8 @@ class Suivi:
             cause = "barre déplacée"
         elif dec is not None and dec.saut:
             cause = "aiguille repartie de zéro"
+        elif self._change(c, nom, barre, lettre_vue):
+            cause = "lettre ou barre changée"
         if cause:
             if c:
                 self._fin_check(now, "réussi" if c["appui"] else "changé sans appui", cause)
@@ -1188,6 +1210,8 @@ class Suivi:
             c["images_barre"] += 1
             if c["centre"] is None:
                 c["centre"] = barre[0]
+            if c["largeur0"] is None:
+                c["largeur0"] = barre[2] - barre[1]
             c["largeur"] = round(barre[2] - barre[1], 2)
         else:
             c["sans_barre"][an.raison or "?"] += 1
@@ -1224,10 +1248,19 @@ class Suivi:
         self.check = {"n": n, "t0": now, "lettre": nom, "score_min": score if nom else 1.0,
                       "centre": barre[0] if barre else None,
                       "largeur": round(barre[2] - barre[1], 2) if barre else None,
+                      "largeur0": barre[2] - barre[1] if barre else None, "autre": 0,
                       "vit": None, "images": 0, "images_barre": 0, "sans_barre": Counter(),
                       "appui": None, "appuis_en_plus": 0}
         self.j.ev("check_debut", cycle=self.n_cycle, n=n, lettre=nom, score=round(score, 3),
                   largeur=self.check["largeur"])
+
+    @staticmethod
+    def _change(c, nom, barre, lettre_vue):
+        autre = c["lettre"] is not None and nom is None and lettre_vue
+        if barre is not None and c["largeur0"]:
+            autre = autre or abs((barre[2] - barre[1]) - c["largeur0"]) > 0.25 * c["largeur0"]
+        c["autre"] = c["autre"] + 1 if autre else 0
+        return c["autre"] >= 2
 
     def _fin_check(self, now, resultat, cause):
         c = self.check
@@ -1640,7 +1673,8 @@ class Moteur:
                     barre_dec = barre if self.dec.attendre and not vert else None
                     decide = self.actif and self.dec.etape(reconnu, barre_dec, maintenant, nouvelle) and not vert
                     if nouvelle:
-                        self.suivi.image(maintenant, reconnu, score, barre, an, self.dec if self.actif else None, vert)
+                        self.suivi.image(maintenant, reconnu, score, barre, an, self.dec if self.actif else None, vert,
+                                         lettre_vue=gris is None or lettre_plausible(gris))
                     fins = self.suivi.fins if nouvelle else []
                     if decide:
                         titre = titre_premier_plan() if cible else ""
