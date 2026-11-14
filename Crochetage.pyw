@@ -190,6 +190,10 @@ def fenetres_du_processus(titre):
     return trouvees
 
 
+def simulation_ouverte():
+    return bool(ctypes.windll.user32.FindWindowW(None, "Simulation crochetage"))
+
+
 class Api:
     def __init__(self, app):
         self._app = app
@@ -253,6 +257,7 @@ class App:
         self.sim = None
         self.stop = False
         self._a_nommer, self._t_a_nommer = 0, 0.0
+        self._t_sim = 0.0
         self._ouvrir_log()
 
         at.set_profil(None)
@@ -589,7 +594,9 @@ class App:
                         return
                 if self.sim and self.sim.poll() is not None:
                     self.sim = None
-                    self.moteur.raccourcis = True
+                if time.time() - self._t_sim > 1.0:
+                    self._t_sim = time.time()
+                    self.moteur.raccourcis = not (self.sim is not None or simulation_ouverte())
                 self.maj_icone()
             except Exception:
                 self.noter("[appli] " + traceback.format_exc().strip().splitlines()[-1])
