@@ -225,6 +225,20 @@ R 0,94, pour un seuil de 0,75 : le bot joue dès le premier crochetage. Les lett
 s'ajoutent à celles-là. Une lettre hors de la liste reste inconnue : le bot ne la joue pas et garde son
 image dans `templates/a_renommer/`.
 
+### 10. Les bruitages
+Pendant que le bot crochète, il joue trois sons, tous synthétisés par le code ([`sons.py`](sons.py)), sans
+aucun fichier audio récupéré ailleurs :
+
+| Moment | Son |
+|---|---|
+| chaque appui | le clic sec d'une goupille, un peu plus aigu à chaque check du cycle |
+| crocheté | un coup sourd de serrure qui cède, puis un petit arpège |
+| raté | la crochette qui casse, puis un « bwoop » grave qui descend |
+
+Ils ne sonnent que pour les vrais appuis du bot, jamais pour une fausse détection du décor. Ils sont joués
+par un fil à part : l'appui n'attend jamais le son. On les coupe d'un clic dans le menu de l'icône,
+**Bruitages**, ou dans `config.json` : `sons` et `volume_sons`, de 0 à 1.
+
 ### Résultats des tests
 | Test | Résultat |
 |---|---|
@@ -301,7 +315,7 @@ chaque raté, et **les réglages à changer** :
 Clic sur le logo : ouvre l'appli (aperçu en direct de ce que voit le bot, crochetages réussis, réglages).
 L'appli et l'info-bulle du logo indiquent l'état du jeu : **FiveM fermé**, **FiveM · Baylife ✓** ou
 **FiveM · autre serveur**. FiveM est reconnu par son processus, pas par un titre de fenêtre.
-Clic droit : Activer, Détecter, Simulation, Quitter.
+Clic droit : Activer, Détecter, Simulation, Bruitages, Quitter.
 
 ## 🧪 La simulation
 **`2_Simulation.bat`** ouvre un crochetage d'entraînement en **plein écran**, façon serveur RP : de nuit,
@@ -366,6 +380,7 @@ Dans `config.json` : `serveur_cible` (`bay.life` par défaut, vide = tous les se
 | [`scene.py`](scene.py) | les décors de la simulation (rue de nuit, véhicule, porte, mini-carte) |
 | [`rapport.py`](rapport.py) | le rapport d'analyse des journaux |
 | [`lettres_base/`](lettres_base) | les lettres de base, reconnues sans apprentissage |
+| [`sons.py`](sons.py) | les bruitages, synthétisés au premier lancement |
 | [`raccourcis.py`](raccourcis.py) | crée l'icône `crochetage.ico` et le lanceur sur le Bureau et dans le menu Démarrer |
 | [`logo.png`](logo.png), `crochetage.ico` | le logo de l'appli et l'icône du lanceur |
 | `config.json`, `templates/`, `logs/` | créés au premier lancement : tes réglages, tes lettres apprises, tes journaux (non versionnés) |

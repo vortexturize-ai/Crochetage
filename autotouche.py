@@ -57,6 +57,8 @@ DEFAULT_CONFIG = {
     "journal": True,
     "captures_echec": True,
     "overlay": True,
+    "sons": True,
+    "volume_sons": 0.7,
     "bleu_hsv": [[90, 100, 100], [130, 255, 255]],
     "rouge_hsv": [[0, 100, 90], [10, 255, 255], [168, 100, 90], [179, 255, 255]],
     "vert_hsv": [[45, 90, 90], [85, 255, 255]],
@@ -1447,6 +1449,7 @@ class Moteur:
         self.jeu_devant, self.serveur_ok, self.serveur_url = False, True, None
         self.fivem_lance = False
         self.sct = None
+        self.sons, self._dc_son = None, None
         self.dernier = ""
         self.version_config = 0
         self.an = None
@@ -1503,6 +1506,26 @@ class Moteur:
         if self.an:
             self.modeles = charger_modeles(self.cfg, self.an.taille_lettre, log=self.log)
             self.nb_modeles = len(self.modeles)
+
+    def _son(self, nom, n=None):
+        if self.sons is None or not self.cfg.get("sons", True):
+            return
+        try:
+            volume = float(self.cfg.get("volume_sons", 0.7))
+            if n is not None:
+                self.sons.goupille(n, volume)
+            else:
+                self.sons.jouer(nom, volume)
+        except Exception as e:
+            self.ev("erreur", ou="sons", msg=str(e))
+
+    def _preparer_sons(self):
+        try:
+            import sons
+            self.sons = sons.Sons(float(self.cfg.get("volume_sons", 0.7)))
+        except Exception as e:
+            self.sons = None
+            self.ev("erreur", ou="sons", msg=str(e))
 
     def _calibrer(self, img):
         band = self.an.calibrer(img)
@@ -1610,6 +1633,7 @@ class Moteur:
         hist, t_hist = deque(maxlen=60), 0.0
         captures = bool(cfg.get("captures_echec", True)) and self.j.f is not None
 
+        self._preparer_sons()
         with MSS() as sct:
             self.sct = sct
             self._init_zone()
@@ -1711,6 +1735,11 @@ class Moteur:
                     if nouvelle:
                         self.suivi.image(maintenant, reconnu, score, barre, an, self.dec if self.actif else None, vert,
                                          lettre_vue=gris is None or lettre_plausible(gris))
+                        dc = self.suivi.dernier_cycle
+                        if dc is not self._dc_son:
+                            self._dc_son = dc
+                            if dc and dc["bot"] and self.actif and dc["resultat"] in ("crocheté", "raté"):
+                                self._son("crochete" if dc["resultat"] == "crocheté" else "rate")
                     fins = self.suivi.fins if nouvelle else []
                     if decide:
                         titre = titre_premier_plan() if cible else ""
@@ -1730,6 +1759,8 @@ class Moteur:
                                 attendre_jusqua(maintenant + self.dec.attente)
                             appuyer(vkn, appui_ms, attendre=False)
                             self.t_appui, self.appui_nom, self.appui_info = time.perf_counter(), nom, self.dec.info
+                            ck = self.suivi.check
+                            self._son("goupille", ck["n"] if ck else 1)
                             self.nb_appuis += 1
                             self.suivi.appui(maintenant, nom, score, True, self.dec.info)
                             info = ""

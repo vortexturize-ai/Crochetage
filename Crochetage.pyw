@@ -338,6 +338,7 @@ class App:
                              lambda: self.q.put("basculer")),
             pystray.MenuItem("Détecter le cercle  ·  F7", lambda: self.q.put("detecter")),
             pystray.MenuItem("Lancer la simulation", lambda: self.q.put("simulation")),
+            pystray.MenuItem("Bruitages", lambda: self.q.put("sons"), checked=lambda it: bool(self.cfg.get("sons", True))),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Quitter", lambda: self.q.put("quitter")),
         )
@@ -641,6 +642,13 @@ class App:
                     self.detecter()
                 elif a == "simulation":
                     self.simulation()
+                elif a == "sons":
+                    self.cfg["sons"] = not self.cfg.get("sons", True)
+                    at.sauver_config(self.cfg)
+                    try:
+                        self.tray.update_menu()
+                    except Exception:
+                        pass
                 elif a == "quitter":
                     return self.quitter()
             if self.sim and self.sim.poll() is not None:
