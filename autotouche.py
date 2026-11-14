@@ -300,7 +300,7 @@ def rogner_modele(gris):
 
 
 def lettre_plausible(gris):
-    return gris is not None and float(np.median(gris)) < 90 and int(gris.max()) > 150
+    return gris is not None and float(np.median(gris)) < 40 and int(gris.max()) > 150
 
 
 def nom_touche_depuis_fichier(fichier):
