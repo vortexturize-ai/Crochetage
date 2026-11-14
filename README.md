@@ -246,11 +246,15 @@ chaque raté, et **les réglages à changer** :
 ## 📦 Installation
 1. Installer [Python 3.12+](https://www.python.org/downloads/) (cocher « Add Python to PATH »).
 2. Télécharger ce dépôt (bouton **Code → Download ZIP**) et le décompresser.
-3. Double-clic sur **`0_installer.bat`** (installe dxcam, mss, OpenCV, numpy, pystray, Pillow).
+3. Double-clic sur **`0_installer.bat`** : il installe dxcam, mss, OpenCV, numpy, pystray et Pillow, puis
+   crée le lanceur **Crochetage** avec son icône sur le Bureau et dans le menu Démarrer.
+4. Pour l'avoir dans la barre des tâches : clic droit sur le raccourci du Bureau, **Afficher d'autres
+   options**, **Épingler à la barre des tâches**.
 
 ## 🎮 Utilisation
-1. Double-clic sur **`1_Lancer Crochetage.bat`** : le logo apparaît près de l'horloge (sinon, regarde
-   dans la flèche `^`). Il est rouge quand le bot est actif, gris en pause.
+1. Clic sur le lanceur **Crochetage**, dans la barre des tâches, le menu Démarrer ou sur le Bureau : le
+   logo apparaît près de l'horloge (sinon, regarde dans la flèche `^`). Il est rouge quand le bot est
+   actif, gris en pause. Un nouveau clic sur le lanceur ouvre la fenêtre de l'appli.
 2. Mets le jeu en **fenêtré sans bordure** (en plein écran exclusif, la capture d'écran sort noire).
 3. Lance un crochetage, puis appuie sur **F7** pendant que l'aiguille tourne : « Cercle trouvé ».
 4. Appuie sur **F6** pour activer ou mettre en pause.
@@ -262,6 +266,8 @@ chaque raté, et **les réglages à changer** :
 | **F8** | apprendre la lettre affichée (puis appuie sur la lettre) |
 
 Clic sur le logo : ouvre l'appli (aperçu en direct de ce que voit le bot, crochetages réussis, réglages).
+L'appli et l'info-bulle du logo indiquent l'état du jeu : **FiveM fermé**, **FiveM · Baylife ✓** ou
+**FiveM · autre serveur**. FiveM est reconnu par son processus, pas par un titre de fenêtre.
 Clic droit : Activer, Détecter, Simulation, Quitter.
 
 ## 🧪 La simulation
@@ -325,7 +331,8 @@ défaut), `capture` (`auto` par défaut, `dxgi` ou `mss`), `journal` (journal d�
 | [`simulation.py`](simulation.py) | la simulation d'entraînement |
 | [`scene.py`](scene.py) | les décors de la simulation (rue de nuit, véhicule, porte, mini-carte) |
 | [`rapport.py`](rapport.py) | le rapport d'analyse des journaux |
-| [`logo.png`](logo.png) | le logo (icône de l'appli) |
+| [`raccourcis.py`](raccourcis.py) | crée l'icône `crochetage.ico` et le lanceur sur le Bureau et dans le menu Démarrer |
+| [`logo.png`](logo.png), `crochetage.ico` | le logo de l'appli et l'icône du lanceur |
 | `config.json`, `templates/`, `logs/` | créés au premier lancement : tes réglages, tes lettres apprises, tes journaux (non versionnés) |
 
 En ligne de commande : `python autotouche.py --detecter`, `--debug`, ou `--test capture.png` pour tester

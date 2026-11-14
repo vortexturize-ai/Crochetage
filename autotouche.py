@@ -122,6 +122,15 @@ user32.GetAsyncKeyState.argtypes = (ctypes.c_int,)
 user32.GetAsyncKeyState.restype = ctypes.c_short
 user32.GetForegroundWindow.restype = wt.HWND
 user32.GetWindowTextW.argtypes = (wt.HWND, wt.LPWSTR, ctypes.c_int)
+user32.IsWindowVisible.argtypes = (wt.HWND,)
+user32.GetWindowThreadProcessId.argtypes = (wt.HWND, ctypes.POINTER(wt.DWORD))
+WNDENUMPROC = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+user32.EnumWindows.argtypes = (WNDENUMPROC, wt.LPARAM)
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+kernel32.OpenProcess.argtypes = (wt.DWORD, wt.BOOL, wt.DWORD)
+kernel32.OpenProcess.restype = wt.HANDLE
+kernel32.QueryFullProcessImageNameW.argtypes = (wt.HANDLE, wt.DWORD, wt.LPWSTR, ctypes.POINTER(wt.DWORD))
+kernel32.CloseHandle.argtypes = (wt.HANDLE,)
 
 
 _SERVEUR = {"t": 0.0, "url": None}
@@ -147,6 +156,38 @@ def serveur_autorise(cible):
         return True, None
     url = serveur_fivem()
     return bool(url and cible.lower() in url.lower()), url
+
+
+def exe_fenetre(hwnd):
+    pid = wt.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    h = kernel32.OpenProcess(0x1000, False, pid.value)
+    if not h:
+        return ""
+    try:
+        buf, n = ctypes.create_unicode_buffer(520), wt.DWORD(520)
+        if kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
+            return os.path.basename(buf.value)
+        return ""
+    finally:
+        kernel32.CloseHandle(h)
+
+
+def fivem_lance():
+    trouve = []
+
+    def rappel(hwnd, _):
+        if user32.IsWindowVisible(hwnd) and exe_fenetre(hwnd).lower().startswith("fivem"):
+            trouve.append(hwnd)
+            return False
+        return True
+
+    user32.EnumWindows(WNDENUMPROC(rappel), 0)
+    return bool(trouve)
+
+
+def fivem_devant():
+    return exe_fenetre(user32.GetForegroundWindow()).lower().startswith("fivem")
 
 
 def titre_premier_plan():
@@ -1223,6 +1264,7 @@ class Moteur:
         self.nb_appuis = self.nb_reussis = 0
         self.nb_crochetages = self.nb_rates = 0
         self.jeu_devant, self.serveur_ok, self.serveur_url = False, True, None
+        self.fivem_lance = False
         self.dernier = ""
         self.version_config = 0
         self.an = None
@@ -1391,6 +1433,7 @@ class Moteur:
                         titre_fg = titre_premier_plan() if cible else ""
                         self.jeu_devant = not cible or cible.lower() in titre_fg.lower()
                         self.serveur_ok, self.serveur_url = serveur_autorise(serveur_cible)
+                        self.fivem_lance = fivem_lance()
                     rc = self.raccourcis
                     if rc and self.touche_quitter and rac.appui(vk_quit):
                         self.log("Bye.")

@@ -5,6 +5,7 @@ import os
 import queue
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -20,10 +21,14 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE)
 sys.path.insert(0, BASE)
 
+DEMANDE_OUVERTURE = os.path.join(tempfile.gettempdir(), "crochetage_ouvrir")
 _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\Crochetage_appli")
 if ctypes.windll.kernel32.GetLastError() == 183:
-    ctypes.windll.user32.MessageBoxW(None, "Crochetage tourne déjà : clique sur son icône près de l'horloge.",
-                                     "Crochetage", 0x40)
+    try:
+        with open(DEMANDE_OUVERTURE, "w") as _f:
+            _f.write(str(time.time()))
+    except OSError:
+        pass
     sys.exit(0)
 
 import numpy as np
@@ -336,17 +341,27 @@ class App:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Quitter", lambda: self.q.put("quitter")),
         )
-        self.tray = pystray.Icon("Crochetage", self.img_off, "Crochetage - en pause", menu)
-        self.etat_icone = False
+        self.tray = pystray.Icon("Crochetage", self.img_off, "Crochetage · en pause", menu)
+        self.etat_icone, self.titre_icone = False, None
         threading.Thread(target=self.tray.run, daemon=True).start()
+
+    def etat_jeu(self):
+        m = self.moteur
+        if not m.fivem_lance:
+            return "FiveM fermé"
+        if not m.serveur_ok:
+            hote = (m.serveur_url or "aucun").split("//")[-1].strip("/")
+            return f"FiveM · autre serveur : {hote}"
+        return "FiveM · Baylife ✓"
 
     def maj_icone(self):
         actif = self.moteur.actif
-        if actif != self.etat_icone:
-            self.etat_icone = actif
+        titre = f"Crochetage · {'ACTIF' if actif else 'en pause'} · {self.etat_jeu()}"
+        if actif != self.etat_icone or titre != self.titre_icone:
+            self.etat_icone, self.titre_icone = actif, titre
             try:
                 self.tray.icon = self.img_on if actif else self.img_off
-                self.tray.title = "Crochetage - ACTIF" if actif else "Crochetage - en pause"
+                self.tray.title = titre
                 self.tray.update_menu()
             except Exception:
                 pass
@@ -610,6 +625,12 @@ class App:
 
     def boucle(self):
         try:
+            if os.path.exists(DEMANDE_OUVERTURE):
+                try:
+                    os.remove(DEMANDE_OUVERTURE)
+                except OSError:
+                    pass
+                self.montrer()
             while not self.q.empty():
                 a = self.q.get()
                 if a == "ouvrir":
@@ -653,13 +674,13 @@ class App:
         else:
             self.carte.itemconfigure(self.it_point, state="hidden")
         if not z:
-            info = "Lance un skill-check en jeu puis F7"
+            info = "Lance un crochetage en jeu puis F7"
         elif m.cercle and m.nom and m.score >= cfg["seuil"]:
-            info = f"Skill-check en cours  ·  lettre {m.nom}"
+            info = f"Crochetage en cours  ·  lettre {m.nom}"
         elif m.cercle:
-            info = "Skill-check en cours  ·  lettre inconnue"
+            info = "Crochetage en cours  ·  lettre inconnue"
         else:
-            info = "En attente d'un skill-check"
+            info = self.etat_jeu()
         self.carte.itemconfigure(self.it_info, text=info)
         self.carte.itemconfigure(self.it_stats, text=f"Crochetés {m.nb_crochetages}   ·   Checks {m.nb_reussis}/{m.nb_appuis}")
         dernier = (m.dernier or (self.journal[-1] if self.journal else "")).split("] ", 1)[-1]
