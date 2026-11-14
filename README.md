@@ -152,7 +152,8 @@ avant et après, même sur les petites barres.
 
 **Appui programmé** : le bot n'attend pas l'image suivante pour se décider. Dès que l'aiguille doit
 atteindre ce point dans les 100 prochaines millisecondes, ou avant l'image suivante si le jeu rame, il
-calcule l'instant exact, attend jusqu'à cette milliseconde et appuie. Une baisse d'images ou un coup de lag
+calcule l'instant exact et confie l'appui à un fil qui part à cette milliseconde, pendant que la
+lecture des images continue. Juste avant d'appuyer, il revérifie que FiveM est toujours devant. Une baisse d'images ou un coup de lag
 de la capture ne le font donc plus sauter par-dessus la barre. La touche est relâchée en arrière-plan,
 sans bloquer la lecture des images suivantes. Tant que la vitesse n'est pas connue, il attend une
 image de plus. Un saut de plus de 60° par rapport à la trajectoire prévue signale un nouveau check,

@@ -1519,6 +1519,23 @@ class Moteur:
         except Exception as e:
             self.ev("erreur", ou="sons", msg=str(e))
 
+    def _appui_programme(self, vk, duree_ms, t_vise, nom, n_check, cible):
+        def tache():
+            attendre_jusqua(t_vise)
+            if self.stop or not self.actif:
+                return
+            if cible and cible.lower() not in titre_premier_plan().lower():
+                self.ev("appui_annule", lettre=nom, raison="fenêtre du jeu plus devant")
+                return
+            appuyer(vk, duree_ms, attendre=False)
+            self.t_appui, self.appui_nom = time.perf_counter(), nom
+            self._son("goupille", n_check)
+
+        if t_vise - time.perf_counter() <= 0.001:
+            tache()
+        else:
+            threading.Thread(target=tache, daemon=True).start()
+
     def _preparer_sons(self):
         try:
             import sons
@@ -1755,14 +1772,12 @@ class Moteur:
                                              raison=f"serveur « {url or 'inconnu'} »")
                             self.t_refus, self.refus = maintenant, "mauvais serveur"
                         else:
-                            if self.dec.attente > 0:
-                                attendre_jusqua(maintenant + self.dec.attente)
-                            appuyer(vkn, appui_ms, attendre=False)
-                            self.t_appui, self.appui_nom, self.appui_info = time.perf_counter(), nom, self.dec.info
+                            t_vise = maintenant + self.dec.attente
                             ck = self.suivi.check
-                            self._son("goupille", ck["n"] if ck else 1)
+                            self.appui_info = self.dec.info
                             self.nb_appuis += 1
-                            self.suivi.appui(maintenant, nom, score, True, self.dec.info)
+                            self.suivi.appui(t_vise, nom, score, True, self.dec.info)
+                            self._appui_programme(vkn, appui_ms, t_vise, nom, ck["n"] if ck else 1, cible)
                             info = ""
                             if barre:
                                 _, debut, fin, rel = barre
