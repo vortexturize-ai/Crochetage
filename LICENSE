@@ -1,0 +1,72 @@
+Licence d'utilisation de Crochetage
+
+Copyright (c) 2026 ninoelhaj (https://github.com/ninoelhaj). Tous droits réservés.
+
+Crochetage n'est pas un logiciel libre. Son code est public pour que tu puisses
+l'installer et voir ce qu'il fait, mais il reste la propriété de son auteur.
+En téléchargeant, en installant ou en utilisant Crochetage, tu acceptes cette
+licence.
+
+
+1. Ce que tu peux faire
+
+   a. Télécharger Crochetage depuis son dépôt officiel :
+      https://github.com/ninoelhaj/crochetage
+   b. L'installer et l'utiliser gratuitement, sur autant d'appareils que tu
+      veux.
+   c. Le construire ou le compiler à partir du code du dépôt, sans rien y
+      changer, avec les outils et les dépendances qu'il demande.
+   d. Le régler avec les options qu'il propose, y compris dans les fichiers de
+      réglages qu'il crée pour toi.
+   e. Lire le code et partager le lien du dépôt officiel.
+
+
+2. Ce que tu ne peux pas faire
+
+   a. Modifier, corriger, adapter ou traduire le code, ni en tirer une autre
+      version ou un autre logiciel.
+   b. Reprendre tout ou partie du code, des images ou des sons de Crochetage dans
+      un autre projet.
+   c. Redistribuer Crochetage, modifié ou non, ailleurs que par son dépôt officiel :
+      pas de réupload, pas de miroir, pas de version modifiée.
+   d. Vendre ou louer Crochetage, ou faire payer son accès ou son installation.
+   e. Retirer ou changer cette licence, le nom de l'auteur ou les mentions de
+      copyright.
+
+
+3. Forks sur GitHub
+
+   Les conditions de GitHub permettent d'afficher et de forker un dépôt public
+   sur GitHub. Un fork ne donne aucun droit de plus : modifier ou redistribuer
+   le code reste interdit.
+
+
+4. Bugs et idées
+
+   Pour signaler un bug ou proposer une idée, ouvre une issue sur le dépôt
+   officiel. Seul l'auteur modifie le code.
+
+
+5. Éléments de tiers
+
+   Les bibliothèques, polices, images et autres éléments de tiers utilisés par
+   Crochetage restent sous leur propre licence.
+
+
+6. Aucune garantie
+
+   Crochetage est fourni tel quel, sans aucune garantie. L'auteur n'est pas
+   responsable des dommages liés à son utilisation, y compris une sanction
+   prise par un jeu, un serveur ou une plateforme.
+
+
+7. Fin des droits
+
+   Si tu ne respectes pas cette licence, ton droit d'utiliser Crochetage prend fin
+   automatiquement et tu dois supprimer tes copies.
+
+
+8. Autres demandes
+
+   Pour tout autre usage, demande l'accord écrit de l'auteur sur GitHub :
+   https://github.com/ninoelhaj

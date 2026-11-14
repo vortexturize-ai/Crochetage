@@ -7,6 +7,7 @@
   <img src="https://img.shields.io/badge/Python-3.12+-E32344?style=flat-square&logo=python&logoColor=white" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/OpenCV-vision-0B0B0E?style=flat-square&logo=opencv&logoColor=white" alt="OpenCV">
   <img src="https://img.shields.io/badge/serveur-Baylife-E32344?style=flat-square" alt="Baylife">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-utilisation%20seule-0B0B0E?style=flat-square" alt="Licence : utilisation seule"></a>
 </p>
 
 **Crochetage** joue tout seul le mini-jeu de crochetage du serveur **Baylife** sur FiveM : portes, véhicules,
@@ -51,6 +52,7 @@ check après check, jusqu'à la barre verte.
 | 🧪 [Simulation](#-simulation) | s'entraîner sans le jeu |
 | 🧠 [Sous le capot](#-sous-le-capot) | comment le moteur décide, et les résultats des tests |
 | 📁 [Fichiers](#-fichiers) | qui fait quoi dans le projet |
+| 📜 [Licence](#-licence) | installer et utiliser, sans modifier |
 
 ---
 
@@ -368,6 +370,14 @@ changer.
 | `config.json`, `templates/`, `logs/` | tes réglages, tes lettres, tes journaux, créés au premier lancement |
 
 En ligne de commande : `python autotouche.py --test capture.png` teste la détection sur une capture.
+
+---
+
+## 📜 Licence
+
+© 2026 ninoelhaj, tous droits réservés. Tu peux installer et utiliser Crochetage gratuitement, et régler tout
+ce que l'appli propose, `config.json` compris. Tu ne peux pas modifier le code, le reprendre dans un autre projet,
+le redistribuer ni le vendre. Un bug ou une idée : ouvre une issue. Tout est dans [LICENSE](LICENSE).
 
 ---
 
