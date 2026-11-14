@@ -9,9 +9,13 @@
   <img src="https://img.shields.io/badge/serveur-Baylife-E32344?style=flat-square" alt="Baylife">
 </p>
 
-**Crochetage** joue tout seul le mini-jeu de crochetage de **Baylife** sur FiveM : portes, véhicules, siphon.
-Il lit l'anneau au centre de l'écran, reconnaît la lettre, suit l'aiguille et appuie au bon moment, check
-après check, jusqu'à la barre verte.
+**Crochetage** joue tout seul le mini-jeu de crochetage du serveur **Baylife** sur FiveM : portes, véhicules,
+siphon. Il lit l'anneau au centre de l'écran, reconnaît la lettre, suit l'aiguille et appuie au bon moment,
+check après check, jusqu'à la barre verte.
+
+> [!NOTE]
+> **Fait uniquement pour Baylife**, `fivem://connect/9zj5ay`. L'anneau, les lettres et les couleurs sont
+> calés sur ce serveur, et le bot vérifie que tu y es connecté avant chaque appui : ailleurs, il reste en veille.
 
 <table>
   <tr>
