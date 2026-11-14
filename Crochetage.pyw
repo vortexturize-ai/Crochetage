@@ -1,5 +1,7 @@
+import base64
 import ctypes
 import ctypes.wintypes as wt
+import io
 import math
 import os
 import queue
@@ -9,7 +11,6 @@ import tempfile
 import threading
 import time
 import traceback
-import tkinter as tk
 from collections import deque
 
 try:
@@ -31,19 +32,16 @@ if ctypes.windll.kernel32.GetLastError() == 183:
         pass
     sys.exit(0)
 
+import cv2
 import numpy as np
 import pystray
-from PIL import Image, ImageDraw, ImageTk
+import webview
+from PIL import Image, ImageDraw
 
 import autotouche as at
-from overlay import OverlayAnneau
+import overlay as ov
 
-ROUGE, ROUGE_FONCE, ROUGE_CLAIR = "#E32344", "#B8162F", "#FF5872"
-FOND, NOIR, CARTE, CARTE2, BORD = "#0E0E11", "#08080A", "#17171C", "#212128", "#2E2E37"
-TEXTE, TEXTE2, TEXTE3 = "#F4F4F6", "#A2A2AE", "#6C6C78"
-POLICE = "Segoe UI"
-W, H = 340, 620
-
+W, H = 320, 470
 LOG = os.path.join(BASE, "crochetage.log")
 RUN_CLE = r"Software\Microsoft\Windows\CurrentVersion\Run"
 RUN_NOM, RUN_ANCIEN = "Crochetage", "ILikeBaylife"
@@ -148,112 +146,113 @@ def _icone_dessinee(actif, taille=64):
     return im.resize((taille, taille), Image.LANCZOS)
 
 
-def rrect(c, x1, y1, x2, y2, r, **kw):
-    pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
-           x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
-    return c.create_polygon(pts, smooth=True, **kw)
+def url_png(im):
+    tampon = io.BytesIO()
+    im.save(tampon, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(tampon.getvalue()).decode()
 
 
-class Bouton(tk.Canvas):
-    STYLES = {
-        "primaire": (ROUGE, ROUGE_CLAIR, ROUGE, "white"),
-        "contour": (CARTE2, "#2A1218", ROUGE, ROUGE_CLAIR),
-        "secondaire": (CARTE2, BORD, BORD, TEXTE),
-        "danger": (CARTE2, "#2A1218", BORD, ROUGE_CLAIR),
-    }
-
-    def __init__(self, parent, texte, commande, largeur, hauteur, f, style="primaire", bg=CARTE, taille=14):
-        super().__init__(parent, width=largeur, height=hauteur, bg=bg, highlightthickness=0, cursor="hand2")
-        self.commande, self.style, self.survol = commande, style, False
-        self.fond = rrect(self, 1, 1, largeur - 2, hauteur - 2, hauteur * 0.24, width=max(1, int(f)))
-        self.txt = self.create_text(largeur / 2, hauteur / 2, text=texte, font=(POLICE, -int(taille * f), "bold"))
-        self.bind("<Enter>", lambda e: self._survol(True))
-        self.bind("<Leave>", lambda e: self._survol(False))
-        self.bind("<ButtonRelease-1>", lambda e: self.commande() if self.commande else None)
-        self._peindre()
-
-    def _survol(self, oui):
-        self.survol = oui
-        self._peindre()
-
-    def _peindre(self):
-        fond, fond_s, contour, texte = self.STYLES[self.style]
-        self.itemconfigure(self.fond, fill=fond_s if self.survol else fond, outline=contour)
-        self.itemconfigure(self.txt, fill=texte)
-
-    def changer(self, texte=None, style=None):
-        if texte is not None:
-            self.itemconfigure(self.txt, text=texte)
-        if style is not None and style != self.style:
-            self.style = style
-            self._peindre()
+def url_jpeg(bgr, qualite=82):
+    ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, qualite])
+    return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode() if ok else None
 
 
-class Interrupteur(tk.Canvas):
-    def __init__(self, parent, valeur, commande, f, bg=CARTE):
-        self.f, self.valeur, self.commande = f, bool(valeur), commande
-        w, h = int(44 * f), int(24 * f)
-        super().__init__(parent, width=w, height=h, bg=bg, highlightthickness=0, cursor="hand2")
-        self.piste = rrect(self, 1, 1, w - 1, h - 1, h / 2, outline="")
-        self.rond = self.create_oval(0, 0, 1, 1, fill="white", outline="")
-        self.bind("<ButtonRelease-1>", self._clic)
-        self._peindre()
-
-    def _clic(self, _):
-        self.valeur = not self.valeur
-        self._peindre()
-        self.commande(self.valeur)
-
-    def _peindre(self):
-        w, h, m = int(self["width"]), int(self["height"]), 3 * self.f
-        self.itemconfigure(self.piste, fill=ROUGE if self.valeur else BORD)
-        x = w - h + m if self.valeur else m
-        self.coords(self.rond, x, m, x + h - 2 * m, h - m)
+def zone_travail():
+    r = wt.RECT()
+    ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(r), 0)
+    return r.left, r.top, r.right, r.bottom
 
 
-class Curseur(tk.Canvas):
-    def __init__(self, parent, mini, maxi, valeur, fmt, commande, largeur, f, bg=CARTE):
-        self.mini, self.maxi, self.valeur, self.fmt, self.commande, self.f = mini, maxi, valeur, fmt, commande, f
-        h = int(30 * f)
-        super().__init__(parent, width=largeur, height=h, bg=bg, highlightthickness=0, cursor="hand2")
-        self.x0, self.x1 = 9 * f, largeur - 62 * f
-        y = h / 2
-        self.piste = self.create_line(self.x0, y, self.x1, y, fill=BORD, width=4 * f, capstyle="round")
-        self.plein = self.create_line(self.x0, y, self.x0, y, fill=ROUGE, width=4 * f, capstyle="round")
-        self.rond = self.create_oval(0, 0, 1, 1, fill="white", outline="")
-        self.txt = self.create_text(largeur - 4 * f, y, anchor="e", fill=TEXTE, font=(POLICE, -int(13 * f), "bold"))
-        self.bind("<Button-1>", self._bouge)
-        self.bind("<B1-Motion>", self._bouge)
-        self.bind("<ButtonRelease-1>", lambda e: self.commande(self.valeur))
-        self._peindre()
+def echelle():
+    try:
+        return ctypes.windll.user32.GetDpiForSystem() / 96.0
+    except Exception:
+        return 1.0
 
-    def _bouge(self, e):
-        t = min(1.0, max(0.0, (e.x - self.x0) / (self.x1 - self.x0)))
-        self.valeur = round(self.mini + t * (self.maxi - self.mini))
-        self._peindre()
 
-    def _peindre(self):
-        t = (self.valeur - self.mini) / (self.maxi - self.mini)
-        x, y, r = self.x0 + t * (self.x1 - self.x0), int(self["height"]) / 2, 8 * self.f
-        self.coords(self.plein, self.x0, y, x, y)
-        self.coords(self.rond, x - r, y - r, x + r, y + r)
-        self.itemconfigure(self.txt, text=self.fmt(self.valeur))
+def fenetres_du_processus(titre):
+    pid = os.getpid()
+    trouvees = []
+    proc = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+
+    def cb(hwnd, _):
+        p = wt.DWORD()
+        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(p))
+        if p.value == pid:
+            n = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+            buf = ctypes.create_unicode_buffer(n + 1)
+            ctypes.windll.user32.GetWindowTextW(hwnd, buf, n + 1)
+            if buf.value == titre:
+                trouvees.append(hwnd)
+        return True
+
+    ctypes.windll.user32.EnumWindows(proc(cb), 0)
+    return trouvees
+
+
+class Api:
+    def __init__(self, app):
+        self._app = app
+
+    def infos(self):
+        return {"logo": url_png(badge(64))}
+
+    def etat(self):
+        return self._app.etat()
+
+    def apercu(self):
+        return self._app.apercu()
+
+    def basculer(self):
+        self._app.q.put("basculer")
+
+    def detecter(self):
+        self._app.q.put("detecter")
+
+    def reglages(self):
+        return self._app.reglages()
+
+    def reglage(self, cle, valeur):
+        self._app.q.put(("reglage", cle, valeur))
+
+    def demarrage(self, valeur):
+        self._app.q.put(("demarrage", bool(valeur)))
+
+    def lettres(self):
+        return self._app.lettres()
+
+    def nommer(self, chemin, lettre):
+        return self._app.nommer(chemin, lettre)
+
+    def simulation(self):
+        self._app.q.put("simulation")
+
+    def dossier_lettres(self):
+        os.startfile(at.TEMPLATES_DIR)
+
+    def quitter(self):
+        self._app.q.put("quitter")
+
+    def cacher(self):
+        self._app.q.put("cacher")
+
+    def perte_focus(self):
+        self._app.q.put("perte_focus")
+
+    def focus(self):
+        self._app.t_focus = time.time()
 
 
 class App:
+    REDEMARRE = {"latence_ms", "cible", "seuil", "fenetre_cible", "apprentissage_auto"}
+
     def __init__(self):
-        self.root = tk.Tk()
-        self.root.withdraw()
-        self.f = self.root.winfo_fpixels("1i") / 96.0
-        self.root.overrideredirect(True)
-        self.root.attributes("-topmost", True)
-        self.root.configure(bg=FOND)
-        self.root.title("Crochetage")
         self.q = queue.Queue()
         self.journal = deque(maxlen=200)
-        self.visible, self.t_montre, self.vue = False, 0.0, None
+        self.visible, self.t_montre, self.t_focus = True, time.time(), time.time()
         self.sim = None
-        self.photo = None
+        self.stop = False
+        self._a_nommer, self._t_a_nommer = 0, 0.0
         self._ouvrir_log()
 
         at.set_profil(None)
@@ -262,24 +261,31 @@ class App:
         if neuf:
             self.cfg["fenetre_cible"] = "FiveM"
             at.sauver_config(self.cfg)
-        self.version_cfg = -1
 
         self.moteur = None
         self.demarrer_moteur(actif=False)
-        self.construire()
-        self.overlay = OverlayAnneau(
-            self.root, lambda: self.moteur,
-            lambda m: bool(self.cfg.get("overlay", True) and m.actif and m.jeu_devant), f=self.f)
-        self.creer_icone()
-        self.root.bind("<FocusOut>", lambda e: self.root.after(250, self._verifier_focus))
-        self.root.after(60, self.boucle)
-        self.root.after(300, self.montrer)
+        self.api = Api(self)
+        x, y = self.position()
+        with open(os.path.join(BASE, "interface", "index.html"), encoding="utf-8") as f:
+            html = f.read()
+        self.fenetre = webview.create_window(
+            "Crochetage", html=html, js_api=self.api, width=W, height=H, x=x, y=y, frameless=True,
+            on_top=True, resizable=False, background_color="#0B0B0E", easy_drag=False, shadow=True)
+        self.animateur = ov.Animateur([
+            lambda: ov.OverlayAnneau(None, lambda: self.moteur, self._overlay_visible),
+            lambda: ov.LogoAnime(lambda: self.moteur, self._logo_visible, os.path.join(BASE, "logo.png")),
+        ])
 
-    def px(self, v):
-        return int(round(v * self.f))
+    def _overlay_visible(self, m):
+        return bool(self.cfg.get("overlay", True) and m.actif and m.jeu_devant)
 
-    def police(self, taille, gras=False):
-        return (POLICE, -self.px(taille), "bold") if gras else (POLICE, -self.px(taille))
+    def _logo_visible(self, m):
+        return bool(self.cfg.get("logo_anime", True) and m.actif and m.jeu_devant and m.serveur_ok)
+
+    def position(self):
+        g, h_, d, b = zone_travail()
+        k = echelle()
+        return int((d - 12 * k) / k - W), int((b - 12 * k) / k - H)
 
     def _ouvrir_log(self):
         try:
@@ -310,6 +316,9 @@ class App:
             m.nb_appuis, m.nb_reussis = ancien.nb_appuis, ancien.nb_reussis
             m.nb_crochetages, m.nb_rates = ancien.nb_crochetages, ancien.nb_rates
             m.raccourcis = ancien.raccourcis
+            if ancien.suivi is not None:
+                m.historique_initial = list(ancien.suivi.historique)
+                m.stats_initiales = dict(ancien.suivi.stats)
         self.moteur = m
 
         def run():
@@ -325,10 +334,111 @@ class App:
         self.moteur.basculer()
         self.maj_icone()
 
-    def reglage(self, cle, valeur):
-        self.cfg[cle] = valeur
-        at.sauver_config(self.cfg)
-        self.demarrer_moteur()
+    def etat_jeu(self):
+        m = self.moteur
+        if not m.fivem_lance:
+            return "FiveM fermé"
+        if not m.serveur_ok:
+            hote = (m.serveur_url or "aucun").split("//")[-1].strip("/")
+            return f"FiveM · autre serveur : {hote}"
+        return "FiveM · Baylife ✓"
+
+    def etat(self):
+        m = self.moteur
+        su = m.suivi
+        now = time.perf_counter()
+        if not m.fivem_lance:
+            jeu = {"texte": "FiveM fermé", "niveau": ""}
+        elif not m.serveur_ok:
+            jeu = {"texte": "Autre serveur", "niveau": "attention"}
+        else:
+            jeu = {"texte": "Baylife", "niveau": "ok"}
+        cycle, check = (su.cycle, su.check) if su else (None, None)
+        dc = su.dernier_cycle if su else None
+        if not m.actif:
+            sous = "Clique ou appuie sur F6" if m.fivem_lance else "FiveM fermé · clique pour activer"
+        elif not m.fivem_lance:
+            sous = "En attente de FiveM"
+        elif not m.serveur_ok:
+            sous = "En veille hors de Baylife"
+        elif cycle:
+            n = check["n"] if check else len(cycle["checks"]) + 1
+            lettre = m.nom if (m.nom and m.score >= self.cfg.get("seuil", 0.75)) else None
+            sous = f"Crochetage · check {n}" + (f" · {lettre}" if lettre else "")
+        elif dc and now - dc["t"] < 4 and dc["bot"]:
+            sous = (f"Crocheté · {dc['nb_checks']}/{dc['nb_checks']}" if dc["resultat"] == "crocheté"
+                    else f"Raté au check {dc['nb_checks']}" if dc["resultat"] == "raté" else "Prêt")
+        else:
+            sous = "Prêt, en attente d'un crochetage"
+        histo = list(su.historique) if su else []
+        durees = [c["duree"] for c in histo if c["bot"] and c["resultat"] == "crocheté"]
+        maintenant = time.time()
+        if maintenant - self._t_a_nommer > 2.0:
+            self._t_a_nommer = maintenant
+            try:
+                self._a_nommer = len(at.lettres_a_nommer())
+            except Exception:
+                self._a_nommer = 0
+        return {
+            "actif": bool(m.actif), "jeu": jeu, "sous": sous,
+            "stats": {"crochetes": m.nb_crochetages,
+                      "taux": round(100 * m.nb_reussis / m.nb_appuis) if m.nb_appuis else None,
+                      "duree": round(sum(durees) / len(durees), 1) if durees else None},
+            "historique": [dict(c, age=maintenant - c["heure"]) for c in reversed(histo[-15:])],
+            "a_nommer": self._a_nommer,
+        }
+
+    def apercu(self):
+        m = self.moteur
+        an, img = m.an, m.image
+        if an is None or img is None or not (m.cercle and m.serveur_ok):
+            return {"image": None, "legende": ""}
+        bgr = np.ascontiguousarray(img[:, :, :3])
+        out = {"image": url_jpeg(bgr), "r_ext": float(an.anneau_r[1]), "barre": None, "aiguille": None, "cible": None}
+        barre, dec = m.barre, getattr(m, "dec", None)
+        morceaux = []
+        if m.nom and m.score >= self.cfg.get("seuil", 0.75):
+            morceaux.append(f"Lettre {m.nom}")
+        if barre:
+            centre, debut, fin, rel = barre
+            out["barre"] = [centre + debut, centre + fin]
+            out["aiguille"] = centre + rel
+            if dec is not None and dec.vit is not None:
+                morceaux.append(f"{abs(dec.vit):.0f}°/s")
+                lo, hi = dec.fenetre(debut, fin)
+                if hi > lo and not dec.verrou:
+                    out["cible"] = centre + (hi if dec.vit < 0 else lo)
+        out["legende"] = "  ·  ".join(morceaux)
+        return out
+
+    def reglages(self):
+        r = {k: self.cfg.get(k) for k in ("cible", "latence_ms", "seuil", "sons", "overlay", "logo_anime",
+                                           "apprentissage_auto", "fenetre_cible")}
+        try:
+            r["demarrage"] = bool(demarrage_windows())
+        except Exception:
+            r["demarrage"] = False
+        return r
+
+    def lettres(self):
+        inconnues = []
+        for chemin in at.lettres_a_nommer()[:12]:
+            img = at.lire_image(chemin)
+            if img is not None:
+                inconnues.append({"chemin": chemin, "image": url_png(Image.fromarray(img))})
+        connues = sorted({at.nom_touche_depuis_fichier(f) for f in os.listdir(at.TEMPLATES_DIR)
+                          if f.lower().endswith(".png")} | {at.nom_touche_depuis_fichier(f) for f in
+                                                             os.listdir(at.LETTRES_BASE) if f.lower().endswith(".png")})
+        return {"inconnues": inconnues, "connues": connues}
+
+    def nommer(self, chemin, lettre):
+        try:
+            at.nommer_inconnue(chemin, lettre)
+            self.moteur.demande_rechargement = True
+            return True
+        except ValueError as err:
+            self.noter(f"[appli] {err}")
+            return False
 
     def creer_icone(self):
         self.img_on, self.img_off = icone(True), icone(False)
@@ -346,15 +456,6 @@ class App:
         self.etat_icone, self.titre_icone = False, None
         threading.Thread(target=self.tray.run, daemon=True).start()
 
-    def etat_jeu(self):
-        m = self.moteur
-        if not m.fivem_lance:
-            return "FiveM fermé"
-        if not m.serveur_ok:
-            hote = (m.serveur_url or "aucun").split("//")[-1].strip("/")
-            return f"FiveM · autre serveur : {hote}"
-        return "FiveM · Baylife ✓"
-
     def maj_icone(self):
         actif = self.moteur.actif
         titre = f"Crochetage · {'ACTIF' if actif else 'en pause'} · {self.etat_jeu()}"
@@ -367,249 +468,40 @@ class App:
             except Exception:
                 pass
 
-    def placer(self):
-        r = wt.RECT()
-        ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(r), 0)
-        w, h = self.px(W), self.px(H)
-        self.root.geometry(f"{w}x{h}+{r.right - w - self.px(12)}+{r.bottom - h - self.px(12)}")
+    def _hwnd(self):
+        h = fenetres_du_processus("Crochetage")
+        return h[0] if h else None
+
+    def _style_fenetre(self):
+        hwnd = self._hwnd()
+        if not hwnd:
+            return
+        try:
+            pref = ctypes.c_int(2)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(wt.HWND(hwnd), 33, ctypes.byref(pref), 4)
+        except Exception:
+            pass
 
     def montrer(self):
-        self.placer()
-        self.root.deiconify()
-        self.root.lift()
+        x, y = self.position()
+        try:
+            self.fenetre.move(x, y)
+            self.fenetre.show()
+        except Exception:
+            pass
         self.visible, self.t_montre = True, time.time()
         self.moteur.apercu = True
-        try:
-            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
-            pref = ctypes.c_int(2)
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(pref), 4)
-            ctypes.windll.user32.SetForegroundWindow(hwnd)
-        except Exception:
-            pass
-        self.root.focus_force()
-        self.afficher(self.vue or "accueil")
+        hwnd = self._hwnd()
+        if hwnd:
+            ctypes.windll.user32.SetForegroundWindow(wt.HWND(hwnd))
 
     def cacher(self):
-        self.root.withdraw()
-        self.visible = False
-        self.moteur.apercu = False
-
-    def _verifier_focus(self):
         try:
-            dehors = self.root.focus_get() is None
-        except Exception:
-            dehors = False
-        if self.visible and dehors and time.time() - self.t_montre > 0.8:
-            self.cacher()
-
-    def quitter(self):
-        self.moteur.arreter()
-        try:
-            self.tray.stop()
+            self.fenetre.hide()
         except Exception:
             pass
-        if self.sim and self.sim.poll() is None:
-            self.sim.terminate()
-        self.overlay.fermer()
-        self.root.destroy()
-
-    def construire(self):
-        px = self.px
-        self.entete = tk.Canvas(self.root, width=px(W), height=px(60), bg=ROUGE, highlightthickness=0)
-        self.entete.pack(fill="x")
-        self.logo = ImageTk.PhotoImage(badge(px(38)))
-        self.it_logo = self.entete.create_image(px(16), px(30), image=self.logo, anchor="w")
-        self.it_retour = self.entete.create_text(px(18), px(29), text="‹", fill="white", anchor="w",
-                                                 font=self.police(30, True), state="hidden")
-        self.it_titre = self.entete.create_text(px(60), px(30), text="CROCHETAGE", fill="white", anchor="w",
-                                                font=self.police(19, True))
-        self.it_reglages = self.entete.create_text(px(W - 50), px(30), text="⚙", fill="white",
-                                                   font=self.police(21))
-        self.it_cacher = self.entete.create_text(px(W - 20), px(29), text="—", fill="white",
-                                                 font=self.police(15, True))
-        for it, act in ((self.it_reglages, lambda: self.afficher("reglages")),
-                        (self.it_cacher, self.cacher),
-                        (self.it_retour, lambda: self.afficher("accueil"))):
-            self.entete.tag_bind(it, "<ButtonRelease-1>", lambda e, a=act: a())
-            self.entete.tag_bind(it, "<Enter>", lambda e: self.entete.configure(cursor="hand2"))
-            self.entete.tag_bind(it, "<Leave>", lambda e: self.entete.configure(cursor=""))
-        self.sous = tk.Canvas(self.root, width=px(W), height=px(26), bg=ROUGE_FONCE, highlightthickness=0)
-        self.sous.pack(fill="x")
-        self.it_sous_g = self.sous.create_text(px(16), px(13), anchor="w", fill="#FFE3E8", font=self.police(11, True))
-        self.it_sous_d = self.sous.create_text(px(W - 16), px(13), anchor="e", fill="#FFE3E8",
-                                               font=self.police(11, True), text="F6 · F7 · F8")
-        self.corps = tk.Frame(self.root, bg=FOND)
-        self.corps.pack(fill="both", expand=True)
-        self.vues = {"accueil": self.construire_accueil(), "reglages": self.construire_reglages(),
-                     "lettres": tk.Frame(self.corps, bg=FOND)}
-
-    def construire_accueil(self):
-        px = self.px
-        v = tk.Frame(self.corps, bg=FOND)
-        hA = px(250)
-        self.cv = tk.Canvas(v, width=px(W), height=hA, bg=NOIR, highlightthickness=0)
-        self.cv.pack(fill="x")
-        cx, cy = px(W) / 2, hA / 2
-        for k in range(1, 7):
-            r = px(22) * k
-            self.cv.create_oval(cx - r, cy - r, cx + r, cy + r, outline="#15151A")
-        self.cv.create_line(0, cy, px(W), cy, fill="#121216")
-        self.cv.create_line(cx, 0, cx, hA, fill="#121216")
-        self.it_img = self.cv.create_image(cx, cy)
-        self.it_band = [self.cv.create_oval(0, 0, 0, 0, outline=ROUGE_FONCE, dash=(2, 3)) for _ in range(2)]
-        self.it_barre = self.cv.create_arc(0, 0, 0, 0, style="arc", outline="white", width=px(3), state="hidden")
-        self.it_aig = self.cv.create_line(0, 0, 0, 0, fill=ROUGE_CLAIR, width=px(3), state="hidden")
-        self.it_vide = self.cv.create_text(cx, cy, fill=TEXTE2, font=self.police(13), justify="center",
-                                           text="Pas encore de cercle.\n\nLance un skill-check en jeu\n"
-                                                "puis appuie sur F7.")
-        self.it_lettre = self.cv.create_text(px(12), hA - px(8), anchor="sw", fill=TEXTE2, font=self.police(11, True))
-        self.it_fps = self.cv.create_text(px(W - 12), hA - px(8), anchor="se", fill=TEXTE3, font=self.police(10))
-
-        lc, hc = px(W - 24), px(256)
-        carte = tk.Canvas(v, width=lc, height=hc, bg=FOND, highlightthickness=0)
-        carte.pack(pady=(px(10), 0))
-        rrect(carte, 0, 0, lc - 1, hc - 1, px(14), fill=CARTE, outline="")
-        self.it_statut = carte.create_text(px(18), px(30), anchor="w", font=self.police(24, True), fill=TEXTE)
-        self.it_point = carte.create_oval(0, 0, 0, 0, fill=ROUGE, outline="", state="hidden")
-        self.it_info = carte.create_text(px(18), px(62), anchor="w", font=self.police(13, True), fill=TEXTE)
-        self.it_stats = carte.create_text(px(18), px(86), anchor="w", font=self.police(12), fill=TEXTE2)
-        self.it_journal = carte.create_text(px(18), px(108), anchor="w", font=self.police(11), fill=TEXTE3)
-        self.it_lettres = carte.create_text(lc - px(18), px(30), anchor="e", font=self.police(12, True),
-                                            fill=ROUGE_CLAIR, text="")
-        carte.tag_bind(self.it_lettres, "<ButtonRelease-1>", lambda e: self.afficher("lettres"))
-        self.b_detecter = Bouton(carte, "Détecter le cercle  ·  F7", self.detecter, lc - px(36), px(40), self.f,
-                                 style="secondaire", taille=13)
-        carte.create_window(px(18), px(132), anchor="nw", window=self.b_detecter)
-        self.b_actif = Bouton(carte, "Activer", self.basculer, lc - px(36), px(52), self.f, taille=16)
-        carte.create_window(px(18), px(186), anchor="nw", window=self.b_actif)
-        self.carte = carte
-        return v
-
-    def construire_reglages(self):
-        px = self.px
-        v = tk.Frame(self.corps, bg=FOND)
-        lc = px(W - 24)
-
-        def bloc(titre, aide, widget_fn, h=76):
-            c = tk.Canvas(v, width=lc, height=px(h), bg=FOND, highlightthickness=0)
-            c.pack(pady=(px(6), 0))
-            rrect(c, 0, 0, lc - 1, px(h) - 1, px(12), fill=CARTE, outline="")
-            c.create_text(px(16), px(17), anchor="w", text=titre, fill=TEXTE, font=self.police(13, True))
-            if aide:
-                c.create_text(px(16), px(35), anchor="w", text=aide, fill=TEXTE3, font=self.police(10))
-            w = widget_fn(c)
-            return c, w
-
-        def curseur(cle, mini, maxi, fmt, conv=lambda x: x, inv=lambda x: x):
-            def fn(c):
-                cur = Curseur(c, mini, maxi, inv(self.cfg[cle]), fmt,
-                              lambda val: self.reglage(cle, conv(val)), lc - px(32), self.f)
-                c.create_window(px(16), px(44), anchor="nw", window=cur)
-                return cur
-            return fn
-
-        bloc("Anticipation", "Trop tard dans la barre ? Monte. Trop tôt ? Baisse.",
-             curseur("latence_ms", 0, 80, lambda x: f"{x} ms"))
-        bloc("Où viser dans la barre", "0 % = dès l'entrée · 50 % = au milieu",
-             curseur("cible", 0, 50, lambda x: f"{x} %", conv=lambda x: x / 100, inv=lambda x: round(x * 100)))
-        bloc("Reconnaissance des lettres", "Lettre mal reconnue ? Monte. Pas reconnue ? Baisse.",
-             curseur("seuil", 50, 95, lambda x: f"{x} %", conv=lambda x: x / 100, inv=lambda x: round(x * 100)))
-
-        def fenetre(c):
-            e = tk.Entry(c, bg=CARTE2, fg=TEXTE, insertbackground=TEXTE, relief="flat", font=self.police(13),
-                         highlightthickness=1, highlightbackground=BORD, highlightcolor=ROUGE)
-            e.insert(0, self.cfg.get("fenetre_cible") or "")
-            c.create_window(px(16), px(46), anchor="nw", window=e, width=lc - px(32), height=px(24))
-            e.bind("<Return>", lambda ev: self.reglage("fenetre_cible", e.get().strip() or None))
-            e.bind("<FocusOut>", lambda ev: (e.get().strip() or None) != self.cfg.get("fenetre_cible")
-                   and self.reglage("fenetre_cible", e.get().strip() or None))
-            return e
-        bloc("Fenêtre du jeu", "N'appuie que si cette fenêtre est devant, vide pour toutes", fenetre)
-
-        def ligne_inter(titre, valeur, cmd):
-            c = tk.Canvas(v, width=lc, height=px(42), bg=FOND, highlightthickness=0)
-            c.pack(pady=(px(6), 0))
-            rrect(c, 0, 0, lc - 1, px(42) - 1, px(12), fill=CARTE, outline="")
-            c.create_text(px(16), px(21), anchor="w", text=titre, fill=TEXTE, font=self.police(13, True))
-            sw = Interrupteur(c, valeur, cmd, self.f)
-            c.create_window(lc - px(16), px(21), anchor="e", window=sw)
-
-        ligne_inter("Apprendre les lettres tout seul", self.cfg.get("apprentissage_auto", True),
-                    lambda val: self.reglage("apprentissage_auto", val))
-        try:
-            dw = demarrage_windows()
-        except Exception:
-            dw = False
-        ligne_inter("Démarrer avec Windows", dw, lambda val: self._demarrage(val))
-
-        bas = tk.Frame(v, bg=FOND)
-        bas.pack(pady=(px(8), 0))
-        lb = (lc - px(8)) // 2
-        Bouton(bas, "Dossier des lettres", lambda: os.startfile(at.TEMPLATES_DIR), lb, px(36), self.f,
-               style="secondaire", bg=FOND, taille=12).grid(row=0, column=0, padx=(0, px(8)))
-        Bouton(bas, "Simulation", self.simulation, lb, px(36), self.f, style="secondaire", bg=FOND,
-               taille=12).grid(row=0, column=1)
-        Bouton(bas, "Quitter Crochetage", self.quitter, lc, px(36), self.f, style="danger", bg=FOND,
-               taille=12).grid(row=1, column=0, columnspan=2, pady=(px(6), 0))
-        return v
-
-    def construire_lettres(self):
-        px = self.px
-        v = self.vues["lettres"]
-        for w in v.winfo_children():
-            w.destroy()
-        lc = px(W - 24)
-        fichiers = at.lettres_a_nommer()[:5]
-        tk.Label(v, text="Lettres vues mais pas encore connues", bg=FOND, fg=TEXTE, font=self.police(14, True)
-                 ).pack(anchor="w", padx=px(16), pady=(px(12), 0))
-        tk.Label(v, text="Tape la lettre affichée puis Entrée, ou laisse vide pour jeter l'image.", bg=FOND, fg=TEXTE3,
-                 font=self.police(11)).pack(anchor="w", padx=px(16), pady=(px(2), px(4)))
-        self._photos_lettres = []
-        if not fichiers:
-            tk.Label(v, text="Rien à nommer.", bg=FOND, fg=TEXTE2, font=self.police(13)).pack(pady=px(30))
-        for chemin in fichiers:
-            c = tk.Canvas(v, width=lc, height=px(70), bg=FOND, highlightthickness=0)
-            c.pack(pady=(px(6), 0))
-            rrect(c, 0, 0, lc - 1, px(69), px(12), fill=CARTE, outline="")
-            img = at.lire_image(chemin)
-            if img is not None:
-                ph = ImageTk.PhotoImage(Image.fromarray(img).resize((px(54), px(54)), Image.NEAREST))
-                self._photos_lettres.append(ph)
-                c.create_image(px(14), px(35), image=ph, anchor="w")
-            e = tk.Entry(c, bg=CARTE2, fg=TEXTE, insertbackground=TEXTE, relief="flat", justify="center",
-                         font=self.police(20, True), highlightthickness=1, highlightbackground=BORD,
-                         highlightcolor=ROUGE)
-            c.create_window(px(84), px(35), anchor="w", window=e, width=px(60), height=px(40))
-
-            def valider(ev=None, chemin=chemin, e=e):
-                try:
-                    at.nommer_inconnue(chemin, e.get())
-                    self.moteur.demande_rechargement = True
-                except ValueError as err:
-                    self.noter(f"[appli] {err}")
-                self.construire_lettres()
-            e.bind("<Return>", valider)
-            Bouton(c, "OK", valider, px(70), px(36), self.f, taille=13).place(x=lc - px(88), y=px(17))
-        Bouton(v, "Retour", lambda: self.afficher("accueil"), lc, px(40), self.f, style="secondaire", bg=FOND,
-               taille=13).pack(pady=(px(14), 0))
-
-    def afficher(self, nom):
-        if nom == "lettres":
-            self.construire_lettres()
-        for k, fr in self.vues.items():
-            fr.pack_forget()
-        self.vues[nom].pack(fill="both", expand=True)
-        self.vue = nom
-        accueil = nom == "accueil"
-        self.entete.itemconfigure(self.it_logo, state="normal" if accueil else "hidden")
-        self.entete.itemconfigure(self.it_retour, state="hidden" if accueil else "normal")
-        self.entete.itemconfigure(self.it_reglages, state="normal" if accueil else "hidden")
-        self.entete.itemconfigure(self.it_titre, text={"accueil": "CROCHETAGE", "reglages": "RÉGLAGES",
-                                                        "lettres": "LETTRES"}[nom])
-        self.entete.coords(self.it_titre, self.px(60 if accueil else 44), self.px(30))
-
-    def detecter(self):
-        self.moteur.demande_detection = True
+        self.visible = False
+        self.moteur.apercu = False
 
     def simulation(self):
         if self.sim and self.sim.poll() is None:
@@ -618,133 +510,94 @@ class App:
         self.sim = subprocess.Popen([pythonw(), os.path.join(BASE, "simulation.py")], cwd=BASE)
         self.cacher()
 
-    def _demarrage(self, val):
+    def quitter(self):
+        self.stop = True
+        self.moteur.arreter()
+        self.animateur.arreter()
         try:
-            demarrage_windows(val)
-        except Exception as e:
-            self.noter(f"[appli] démarrage avec Windows impossible : {e}")
+            self.tray.stop()
+        except Exception:
+            pass
+        if self.sim and self.sim.poll() is None:
+            self.sim.terminate()
+        try:
+            self.fenetre.destroy()
+        except Exception:
+            pass
+
+    def traiter(self, a):
+        if a == "ouvrir":
+            self.cacher() if self.visible else self.montrer()
+        elif a == "cacher":
+            self.cacher()
+        elif a == "perte_focus":
+            self.t_focus = 0.0
+            threading.Timer(0.3, self._verifier_focus).start()
+        elif a == "basculer":
+            self.basculer()
+        elif a == "detecter":
+            self.moteur.demande_detection = True
+        elif a == "simulation":
+            self.simulation()
+        elif a == "sons":
+            self.cfg["sons"] = not self.cfg.get("sons", True)
+            at.sauver_config(self.cfg)
+            try:
+                self.tray.update_menu()
+            except Exception:
+                pass
+        elif a == "quitter":
+            self.quitter()
+        elif isinstance(a, tuple) and a[0] == "reglage":
+            _, cle, valeur = a
+            if self.cfg.get(cle) != valeur:
+                self.cfg[cle] = valeur
+                at.sauver_config(self.cfg)
+                if cle in self.REDEMARRE:
+                    self.demarrer_moteur()
+        elif isinstance(a, tuple) and a[0] == "demarrage":
+            try:
+                demarrage_windows(a[1])
+            except Exception as e:
+                self.noter(f"[appli] démarrage avec Windows impossible : {e}")
+
+    def _verifier_focus(self):
+        if self.visible and self.t_focus == 0.0 and time.time() - self.t_montre > 0.8:
+            self.q.put("cacher")
 
     def boucle(self):
+        self.animateur.start()
+        self.creer_icone()
         try:
-            if os.path.exists(DEMANDE_OUVERTURE):
-                try:
-                    os.remove(DEMANDE_OUVERTURE)
-                except OSError:
-                    pass
-                self.montrer()
-            while not self.q.empty():
-                a = self.q.get()
-                if a == "ouvrir":
-                    self.cacher() if self.visible else self.montrer()
-                elif a == "basculer":
-                    self.basculer()
-                elif a == "detecter":
-                    self.detecter()
-                elif a == "simulation":
-                    self.simulation()
-                elif a == "sons":
-                    self.cfg["sons"] = not self.cfg.get("sons", True)
-                    at.sauver_config(self.cfg)
-                    try:
-                        self.tray.update_menu()
-                    except Exception:
-                        pass
-                elif a == "quitter":
-                    return self.quitter()
-            if self.sim and self.sim.poll() is not None:
-                self.sim = None
-                self.moteur.raccourcis = True
-            self.maj_icone()
-            if self.visible and self.vue == "accueil":
-                self.maj_accueil()
+            self.fenetre.resize(W, H)
+            self.fenetre.move(*self.position())
         except Exception:
-            self.noter("[appli] " + traceback.format_exc().strip().splitlines()[-1])
-        self.root.after(66, self.boucle)
-
-    def maj_accueil(self):
-        px, m, cfg = self.px, self.moteur, self.cfg
-        z = cfg.get("zone")
-        nb_inconnues = len(at.lettres_a_nommer()) if int(time.time() * 2) % 4 == 0 or not hasattr(self, "_nbi") \
-            else self._nbi
-        self._nbi = nb_inconnues
-        self.sous.itemconfigure(self.it_sous_g, text=(f"Zone : {z['width']} px   ·   Lettres : {m.nb_modeles}"
-                                                      if z else "Zone : pas encore trouvée"))
-        actif = m.actif
-        self.carte.itemconfigure(self.it_statut, text="ACTIF" if actif else "EN PAUSE",
-                                 fill=ROUGE_CLAIR if actif else TEXTE)
-        if actif:
-            bb = self.carte.bbox(self.it_statut)
-            r = px(5)
-            cy = (bb[1] + bb[3]) / 2
-            self.carte.coords(self.it_point, bb[2] + px(10), cy - r, bb[2] + px(10) + 2 * r, cy + r)
-            vis = int(time.time() * 2) % 2 == 0
-            self.carte.itemconfigure(self.it_point, state="normal" if vis else "hidden")
-        else:
-            self.carte.itemconfigure(self.it_point, state="hidden")
-        if not z:
-            info = "Lance un crochetage en jeu puis F7"
-        elif m.cercle and m.nom and m.score >= cfg["seuil"]:
-            info = f"Crochetage en cours  ·  lettre {m.nom}"
-        elif m.cercle:
-            info = "Crochetage en cours  ·  lettre inconnue"
-        else:
-            info = self.etat_jeu()
-        self.carte.itemconfigure(self.it_info, text=info)
-        self.carte.itemconfigure(self.it_stats, text=f"Crochetés {m.nb_crochetages}   ·   Checks {m.nb_reussis}/{m.nb_appuis}")
-        dernier = (m.dernier or (self.journal[-1] if self.journal else "")).split("] ", 1)[-1]
-        self.carte.itemconfigure(self.it_journal, text=dernier if len(dernier) <= 46 else dernier[:45] + "…")
-        self.carte.itemconfigure(self.it_lettres, text=f"{nb_inconnues} à nommer ›" if nb_inconnues else "")
-        self.b_actif.changer("Mettre en pause  ·  F6" if actif else "Activer  ·  F6",
-                             "contour" if actif else "primaire")
-        self.maj_apercu()
-
-    def maj_apercu(self):
-        px, m, cv = self.px, self.moteur, self.cv
-        img, an = m.image, m.an
-        hA = int(cv["height"])
-        cx, cy = px(W) / 2, hA / 2
-        if an is None or img is None:
-            cv.itemconfigure(self.it_vide, state="normal")
-            for it in (self.it_img, self.it_barre, self.it_aig, *self.it_band):
-                cv.itemconfigure(it, state="hidden")
-            cv.itemconfigure(self.it_lettre, text="")
-            cv.itemconfigure(self.it_fps, text="")
-            return
-        cv.itemconfigure(self.it_vide, state="hidden")
-        Z = img.shape[0]
-        P = px(196)
-        k = P / Z
-        pil = Image.fromarray(np.ascontiguousarray(img[:, :, 2::-1])).resize((P, P), Image.BILINEAR)
-        self.photo = ImageTk.PhotoImage(pil)
-        cv.itemconfigure(self.it_img, image=self.photo, state="normal")
-        demi = Z / 2 * k
-        r_in, r_out = an.anneau_r
-        for it, rr in zip(self.it_band, (r_in, r_out)):
-            r = rr * demi
-            cv.coords(it, cx - r, cy - r, cx + r, cy + r)
-            cv.itemconfigure(it, state="normal")
-        if m.barre:
-            centre, debut, fin, rel = m.barre
-            r = (r_in + r_out) / 2 * demi
-            cv.coords(self.it_barre, cx - r, cy - r, cx + r, cy + r)
-            cv.itemconfigure(self.it_barre, start=-(centre + fin), extent=fin - debut, state="normal")
-            a = math.radians(centre + rel)
-            cv.coords(self.it_aig, cx + r_in * demi * 0.85 * math.cos(a), cy + r_in * demi * 0.85 * math.sin(a),
-                      cx + r_out * demi * 1.08 * math.cos(a), cy + r_out * demi * 1.08 * math.sin(a))
-            cv.itemconfigure(self.it_aig, state="normal")
-        else:
-            cv.itemconfigure(self.it_barre, state="hidden")
-            cv.itemconfigure(self.it_aig, state="hidden")
-        if m.nom and m.score >= self.cfg["seuil"]:
-            cv.itemconfigure(self.it_lettre, text=f"Lettre {m.nom}  ·  {m.score * 100:.0f} %", fill=TEXTE)
-        else:
-            cv.itemconfigure(self.it_lettre, text="Lettre : -", fill=TEXTE3)
-        cv.itemconfigure(self.it_fps, text=f"{m.fps:.0f} analyses/s" if m.fps else "")
+            pass
+        self._style_fenetre()
+        while not self.stop:
+            try:
+                if os.path.exists(DEMANDE_OUVERTURE):
+                    try:
+                        os.remove(DEMANDE_OUVERTURE)
+                    except OSError:
+                        pass
+                    self.montrer()
+                while not self.q.empty():
+                    self.traiter(self.q.get())
+                    if self.stop:
+                        return
+                if self.sim and self.sim.poll() is not None:
+                    self.sim = None
+                    self.moteur.raccourcis = True
+                self.maj_icone()
+            except Exception:
+                self.noter("[appli] " + traceback.format_exc().strip().splitlines()[-1])
+            time.sleep(0.05)
 
 
 def main():
     app = App()
-    app.root.mainloop()
+    webview.start(app.boucle, gui="edgechromium")
 
 
 if __name__ == "__main__":

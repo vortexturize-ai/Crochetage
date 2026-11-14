@@ -293,7 +293,7 @@ chaque raté, et **les réglages à changer** :
 ## 📦 Installation
 1. Installer [Python 3.12+](https://www.python.org/downloads/) (cocher « Add Python to PATH »).
 2. Télécharger ce dépôt (bouton **Code → Download ZIP**) et le décompresser.
-3. Double-clic sur **`0_installer.bat`** : il installe dxcam, mss, OpenCV, numpy, pystray et Pillow, puis
+3. Double-clic sur **`0_installer.bat`** : il installe dxcam, mss, OpenCV, numpy, pystray, Pillow et pywebview, puis
    crée le lanceur **Crochetage** avec son icône sur le Bureau et dans le menu Démarrer.
 4. Pour l'avoir dans la barre des tâches : clic droit sur le raccourci du Bureau, **Afficher d'autres
    options**, **Épingler à la barre des tâches**.
@@ -313,10 +313,33 @@ chaque raté, et **les réglages à changer** :
 | **F7** | trouver le cercle (pendant un crochetage) |
 | **F8** | apprendre la lettre affichée (puis appuie sur la lettre) |
 
-Clic sur le logo : ouvre l'appli (aperçu en direct de ce que voit le bot, crochetages réussis, réglages).
-L'appli et l'info-bulle du logo indiquent l'état du jeu : **FiveM fermé**, **FiveM · Baylife ✓** ou
-**FiveM · autre serveur**. FiveM est reconnu par son processus, pas par un titre de fenêtre.
-Clic droit : Activer, Détecter, Simulation, Bruitages, Quitter.
+### L'appli
+Une petite fenêtre de 320 × 470 en bas à droite, en HTML et CSS dans une vue Edge
+([`interface/index.html`](interface/index.html)) : texte et coins nets, animations fluides, thème sombre.
+
+<p align="center"><img src="docs/appli.png" alt="L'appli : direct, historique, réglages, lettres" width="100%"></p>
+
+- **En haut**, le gros bouton active ou met en pause le bot, comme **F6**. Il s'allume en rouge avec un anneau
+  qui tourne quand le moteur tourne. La pastille indique **Baylife**, **Autre serveur** ou **FiveM fermé** ;
+  FiveM est reconnu par son processus.
+- **Trois chiffres** : crochetages réussis, taux de checks réussis, durée moyenne d'un crochetage.
+- **Direct** : ce que voit le bot sur l'anneau, la barre, l'aiguille et le point d'appui, seulement quand un
+  crochetage est affiché.
+- **Historique** : les derniers crochetages, avec leurs checks, leur durée et leur heure.
+- **Réglages** : où viser, anticipation, reconnaissance, bruitages, overlay, logo animé, apprentissage,
+  démarrage avec Windows.
+- **Lettres** : les lettres à nommer d'un mot, et celles déjà connues.
+
+La fenêtre se cache quand tu cliques ailleurs. Clic sur le logo près de l'horloge, ou sur le lanceur, pour la
+rouvrir. Clic droit : Activer, Détecter, Simulation, Bruitages, Quitter.
+
+### Le logo animé en jeu
+Quand le bot est actif sur Baylife, le logo Crochetage flotte en bas à droite de l'écran : deux arcs tournent
+autour comme un moteur en marche, plus vite pendant un crochetage. Un halo respire, une onde part à chaque
+appui, et tout passe au vert quand c'est crocheté. Comme l'overlay, il laisse passer les clics et reste
+invisible pour les captures. Réglage **Logo animé en jeu**, ou `logo_anime` dans `config.json`.
+
+<p align="center"><img src="docs/logo_anime.png" alt="Le logo animé : repos, crochetage, appui, crocheté" width="100%"></p>
 
 ## 🧪 La simulation
 **`2_Simulation.bat`** ouvre un crochetage d'entraînement en **plein écran**, façon serveur RP : de nuit,
@@ -374,9 +397,10 @@ Dans `config.json` : `serveur_cible` (`bay.life` par défaut, vide = tous les se
 ## 📁 Fichiers du projet
 | Fichier | Rôle |
 |---|---|
-| [`Crochetage.pyw`](Crochetage.pyw) | l'appli (zone de notification + fenêtre style Mullvad) |
+| [`Crochetage.pyw`](Crochetage.pyw) | l'appli : icône près de l'horloge, fenêtre web, overlays |
+| [`interface/index.html`](interface/index.html) | l'interface de l'appli, en HTML, CSS et JavaScript |
 | [`autotouche.py`](autotouche.py) | le moteur : détection, analyse, décision, clavier, journal (utilisable aussi en ligne de commande) |
-| [`overlay.py`](overlay.py) | l'overlay dessiné en direct sur l'anneau, en jeu et dans la simulation |
+| [`overlay.py`](overlay.py) | l'overlay sur l'anneau et le logo animé, en jeu et dans la simulation |
 | [`simulation.py`](simulation.py) | la simulation d'entraînement |
 | [`scene.py`](scene.py) | les décors de la simulation (rue de nuit, véhicule, porte, mini-carte) |
 | [`rapport.py`](rapport.py) | le rapport d'analyse des journaux |

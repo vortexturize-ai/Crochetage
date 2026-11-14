@@ -58,6 +58,7 @@ DEFAULT_CONFIG = {
     "captures_echec": True,
     "overlay": True,
     "sons": True,
+    "logo_anime": True,
     "volume_sons": 0.7,
     "bleu_hsv": [[90, 100, 100], [130, 255, 255]],
     "rouge_hsv": [[0, 100, 90], [10, 255, 255], [168, 100, 90], [179, 255, 255]],
@@ -1192,6 +1193,7 @@ class Suivi:
         self.cycle = self.check = None
         self.n_cycle = 0
         self.dernier_cycle = None
+        self.historique = deque(maxlen=40)
         self.t_vu = 0.0
         self.apres_vert = False
         self.fins = []
@@ -1337,6 +1339,10 @@ class Suivi:
         self.stats[cle] += 1
         duree = now - cy["t0"]
         self.dernier_cycle = {"resultat": resultat, "nb_checks": len(cy["checks"]), "t": now, "bot": bot}
+        if bot or resultat == "crocheté":
+            self.historique.append({"heure": time.time(), "resultat": resultat, "nb_checks": len(cy["checks"]),
+                                    "reussis": sum(1 for c in cy["checks"] if c.startswith("réussi")),
+                                    "duree": round(duree, 2), "bot": bot})
         self.j.ev("cycle_fin", cycle=cy["n"], resultat=resultat, nb_checks=len(cy["checks"]),
                   checks=cy["checks"], duree_ms=round(duree * 1000, 1), bot=bot, appuis=cy["appuis"])
         if not bot:
@@ -1450,6 +1456,8 @@ class Moteur:
         self.fivem_lance = False
         self.sct = None
         self.sons, self._dc_son = None, None
+        self.historique_initial = None
+        self.stats_initiales = None
         self.dernier = ""
         self.version_config = 0
         self.an = None
@@ -1603,6 +1611,10 @@ class Moteur:
         sys.setswitchinterval(0.001)
         self.j = Journal(self.journal_prefixe, bool(self.cfg.get("journal", True)), self.journal_horodatage)
         self.suivi = Suivi(self.j, log=self.log)
+        if self.historique_initial:
+            self.suivi.historique.extend(self.historique_initial)
+        if self.stats_initiales:
+            self.suivi.stats.update(self.stats_initiales)
         self.ev("session_debut", version=VERSION, python=platform.python_version(), os=platform.platform(),
                 profil=os.path.basename(CONFIG_PATH), config=self.cfg, actif=self.actif)
         code = 1
@@ -1749,7 +1761,8 @@ class Moteur:
 
                     barre_dec = barre if self.dec.attendre and not vert else None
                     decide = self.actif and self.dec.etape(reconnu, barre_dec, maintenant, nouvelle) and not vert
-                    if nouvelle:
+                    suivre = nouvelle and self.jeu_devant
+                    if suivre:
                         self.suivi.image(maintenant, reconnu, score, barre, an, self.dec if self.actif else None, vert,
                                          lettre_vue=gris is None or lettre_plausible(gris))
                         dc = self.suivi.dernier_cycle
@@ -1757,7 +1770,7 @@ class Moteur:
                             self._dc_son = dc
                             if dc and dc["bot"] and self.actif and dc["resultat"] in ("crocheté", "raté"):
                                 self._son("crochete" if dc["resultat"] == "crocheté" else "rate")
-                    fins = self.suivi.fins if nouvelle else []
+                    fins = self.suivi.fins if suivre else []
                     if decide:
                         titre = titre_premier_plan() if cible else ""
                         serveur_ok, url = serveur_autorise(serveur_cible)

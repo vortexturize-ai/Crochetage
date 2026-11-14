@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Crochetage</title>
+<style>
+:root {
+  --bg: #0b0b0e;
+  --surface: #131317;
+  --surface2: #1b1b21;
+  --line: rgba(255, 255, 255, .07);
+  --line2: rgba(255, 255, 255, .12);
+  --text: #f3f3f5;
+  --text2: #a3a3ae;
+  --text3: #6c6c78;
+  --accent: #e32344;
+  --accent2: #ff4d6a;
+  --vert: #3ddc84;
+  --orange: #ffb347;
+  --cyan: #7fdbff;
+  --r: 14px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: var(--bg); color: var(--text); overflow: hidden; user-select: none; }
+body { font: 13px/1.35 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+.app { height: 100%; display: flex; flex-direction: column; padding: 0 12px 12px; }
+
+.barre { height: 44px; display: flex; align-items: center; gap: 9px; flex: none; }
+.barre img { width: 22px; height: 22px; border-radius: 6px; }
+.marque { font-weight: 650; font-size: 14px; letter-spacing: .2px; flex: 1; }
+.puce { display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 11px;
+  background: var(--surface); border: 1px solid var(--line); color: var(--text2); font-size: 11.5px; font-weight: 600; }
+.puce i { width: 6px; height: 6px; border-radius: 50%; background: var(--text3); }
+.puce.ok i { background: var(--vert); box-shadow: 0 0 8px var(--vert); }
+.puce.attention i { background: var(--orange); }
+.icone { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; color: var(--text2); }
+.icone:hover { background: var(--surface2); color: var(--text); }
+
+.heros { display: flex; align-items: center; gap: 14px; padding: 12px; border-radius: var(--r);
+  background: linear-gradient(160deg, #17171c, #111114); border: 1px solid var(--line); flex: none; }
+.marche { position: relative; width: 62px; height: 62px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  background: var(--surface2); border: 1px solid var(--line2); transition: transform .15s ease, box-shadow .3s ease; }
+.marche:hover { transform: scale(1.04); }
+.marche:active { transform: scale(.97); }
+.marche svg { width: 24px; height: 24px; stroke: var(--text2); transition: stroke .3s ease; }
+.marche::before { content: ""; position: absolute; inset: -3px; border-radius: 50%; padding: 2px; opacity: 0;
+  background: conic-gradient(from 0deg, transparent 0 55%, var(--accent) 80%, var(--accent2) 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  transition: opacity .3s ease; animation: tour 1.6s linear infinite; }
+.actif .marche { background: radial-gradient(circle at 50% 40%, #2a1016, #18090d); border-color: rgba(227, 35, 68, .45);
+  box-shadow: 0 0 22px rgba(227, 35, 68, .35); }
+.actif .marche svg { stroke: var(--accent2); }
+.actif .marche::before { opacity: 1; }
+@keyframes tour { to { transform: rotate(360deg); } }
+.etat-titre { font-size: 19px; font-weight: 700; letter-spacing: .1px; }
+.actif .etat-titre { color: var(--accent2); }
+.etat-sous { color: var(--text2); margin-top: 2px; font-size: 12px; min-height: 16px; }
+.touches { color: var(--text3); font-size: 11px; margin-top: 6px; }
+kbd { font: 600 10.5px "Segoe UI", sans-serif; padding: 1px 5px; border-radius: 4px; background: var(--surface2);
+  border: 1px solid var(--line2); color: var(--text2); }
+
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; flex: none; }
+.stat { padding: 8px 10px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }
+.stat b { display: block; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--text3); font-size: 11px; }
+
+.onglets { position: relative; display: grid; grid-template-columns: repeat(4, 1fr); margin: 10px 0 8px; padding: 3px;
+  border-radius: 11px; background: var(--surface); border: 1px solid var(--line); flex: none; }
+.onglets button { position: relative; z-index: 1; height: 26px; border-radius: 8px; color: var(--text2); font-size: 12px;
+  font-weight: 600; transition: color .2s ease; }
+.onglets button.on { color: var(--text); }
+.curseur-onglet { position: absolute; top: 3px; bottom: 3px; left: 3px; border-radius: 8px; background: var(--surface2);
+  border: 1px solid var(--line2); transition: transform .25s cubic-bezier(.3, .7, .2, 1); }
+.badge[hidden] { display: none; }
+.badge { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; margin-left: 3px;
+  border-radius: 8px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 700; vertical-align: 1px; }
+
+.panneaux { position: relative; flex: 1; min-height: 0; }
+.panneau { position: absolute; inset: 0; overflow-y: auto; opacity: 0; pointer-events: none; transform: translateY(4px);
+  transition: opacity .2s ease, transform .2s ease; padding-right: 2px; }
+.panneau.on { opacity: 1; pointer-events: auto; transform: none; }
+.panneau::-webkit-scrollbar { width: 4px; }
+.panneau::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 2px; }
+
+.direct { display: flex; flex-direction: column; align-items: center; gap: 8px; padding-top: 2px; }
+.ecran { position: relative; width: 150px; height: 150px; border-radius: 50%; overflow: hidden; background: #08080a;
+  border: 1px solid var(--line); }
+.ecran canvas { width: 150px; height: 150px; }
+.vide { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; color: var(--text3);
+  font-size: 11.5px; padding: 18px; }
+.legende { color: var(--text2); font-size: 12px; font-variant-numeric: tabular-nums; min-height: 16px; }
+
+.liste { display: flex; flex-direction: column; gap: 6px; }
+.ligne { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 11px; background: var(--surface);
+  border: 1px solid var(--line); }
+.ligne i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.ligne .t { flex: 1; font-weight: 600; }
+.ligne .d { color: var(--text3); font-size: 11.5px; font-variant-numeric: tabular-nums; text-align: right; }
+.rien { color: var(--text3); text-align: center; padding: 26px 8px; font-size: 12px; }
+
+.reglage { padding: 9px 11px; border-radius: 11px; background: var(--surface); border: 1px solid var(--line); margin-bottom: 6px; }
+.reglage .haut { display: flex; justify-content: space-between; align-items: baseline; }
+.reglage .nom { font-weight: 600; }
+.reglage .val { color: var(--text2); font-variant-numeric: tabular-nums; font-size: 12px; }
+.reglage .aide { color: var(--text3); font-size: 11px; margin-top: 1px; }
+input[type=range] { -webkit-appearance: none; width: 100%; height: 18px; background: transparent; margin-top: 4px; }
+input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent) var(--p, 50%), var(--line2) var(--p, 50%)); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px;
+  border-radius: 50%; background: #fff; box-shadow: 0 0 0 3px rgba(227, 35, 68, .25); }
+.bascule { display: flex; align-items: center; justify-content: space-between; }
+.inter { position: relative; width: 36px; height: 20px; flex: none; }
+.inter input { display: none; }
+.inter span { position: absolute; inset: 0; border-radius: 10px; background: var(--line2); transition: background .2s ease; }
+.inter span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; transition: transform .2s cubic-bezier(.3, .7, .2, 1); }
+.inter input:checked + span { background: var(--accent); }
+.inter input:checked + span::after { transform: translateX(16px); }
+.champ { width: 100%; margin-top: 6px; height: 28px; border-radius: 8px; border: 1px solid var(--line2); background: var(--surface2);
+  color: var(--text); padding: 0 9px; font: inherit; outline: none; }
+.champ:focus { border-color: var(--accent); }
+.boutons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 2px; }
+.btn { height: 30px; border-radius: 9px; background: var(--surface2); border: 1px solid var(--line2); font-weight: 600; font-size: 12px; }
+.btn:hover { border-color: rgba(255, 255, 255, .22); }
+.btn.danger { color: var(--accent2); grid-column: span 2; }
+
+.lettres { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.lettre { display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 11px; background: var(--surface);
+  border: 1px solid var(--line); }
+.lettre img { width: 40px; height: 40px; border-radius: 7px; image-rendering: pixelated; background: #000; }
+.lettre input { width: 100%; height: 32px; border-radius: 8px; border: 1px solid var(--line2); background: var(--surface2);
+  color: var(--text); text-align: center; font: 700 16px "Segoe UI", sans-serif; text-transform: uppercase; outline: none; }
+.lettre input:focus { border-color: var(--accent); }
+.connues { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.connues span { min-width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; background: var(--surface);
+  border: 1px solid var(--line); font-weight: 700; font-size: 12px; }
+.titre-section { color: var(--text3); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; margin: 4px 2px 6px; }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header class="barre pywebview-drag-region">
+    <img id="logo" alt="">
+    <div class="marque">Crochetage</div>
+    <div class="puce" id="puce"><i></i><span id="puce-texte">…</span></div>
+    <button class="icone" id="cacher" title="Réduire">
+      <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 6h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </button>
+  </header>
+
+  <section class="heros" id="heros">
+    <button class="marche" id="marche" title="Activer ou mettre en pause">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M12 3v8"/><path d="M6.3 6.6a8 8 0 1 0 11.4 0"/></svg>
+    </button>
+    <div>
+      <div class="etat-titre" id="etat-titre">En pause</div>
+      <div class="etat-sous" id="etat-sous"></div>
+      <div class="touches"><kbd>F6</kbd> activer · <kbd>F7</kbd> recaler</div>
+    </div>
+  </section>
+
+  <section class="stats">
+    <div class="stat"><b id="s-croch">0</b><span>crochetés</span></div>
+    <div class="stat"><b id="s-taux">–</b><span>réussite</span></div>
+    <div class="stat"><b id="s-duree">–</b><span>en moyenne</span></div>
+  </section>
+
+  <nav class="onglets" id="onglets">
+    <div class="curseur-onglet" id="curseur-onglet"></div>
+    <button data-p="direct" class="on">Direct</button>
+    <button data-p="historique">Historique</button>
+    <button data-p="reglages">Réglages</button>
+    <button data-p="lettres">Lettres<span class="badge" id="badge" hidden>0</span></button>
+  </nav>
+
+  <div class="panneaux">
+    <section class="panneau on direct" id="p-direct">
+      <div class="ecran"><canvas id="canvas" width="300" height="300"></canvas><div class="vide" id="vide">Lance un crochetage en jeu : tu verras ici ce que voit le bot.</div></div>
+      <div class="legende" id="legende"></div>
+    </section>
+    <section class="panneau" id="p-historique"><div class="liste" id="historique"></div></section>
+    <section class="panneau" id="p-reglages">
+      <div class="reglage">
+        <div class="haut"><span class="nom">Où viser dans la barre</span><span class="val" id="v-cible"></span></div>
+        <div class="aide">0 % à l'entrée, 50 % au milieu</div>
+        <input type="range" id="r-cible" min="0" max="50" step="1">
+      </div>
+      <div class="reglage">
+        <div class="haut"><span class="nom">Anticipation</span><span class="val" id="v-latence"></span></div>
+        <div class="aide">Trop tard dans la barre ? Monte. Trop tôt ? Baisse.</div>
+        <input type="range" id="r-latence" min="0" max="80" step="1">
+      </div>
+      <div class="reglage">
+        <div class="haut"><span class="nom">Reconnaissance des lettres</span><span class="val" id="v-seuil"></span></div>
+        <div class="aide">Lettre mal reconnue ? Monte. Pas reconnue ? Baisse.</div>
+        <input type="range" id="r-seuil" min="50" max="95" step="1">
+      </div>
+      <div class="reglage bascule"><span class="nom">Bruitages</span><label class="inter"><input type="checkbox" data-cle="sons"><span></span></label></div>
+      <div class="reglage bascule"><span class="nom">Overlay sur l'anneau</span><label class="inter"><input type="checkbox" data-cle="overlay"><span></span></label></div>
+      <div class="reglage bascule"><span class="nom">Logo animé en jeu</span><label class="inter"><input type="checkbox" data-cle="logo_anime"><span></span></label></div>
+      <div class="reglage bascule"><span class="nom">Apprendre les lettres seul</span><label class="inter"><input type="checkbox" data-cle="apprentissage_auto"><span></span></label></div>
+      <div class="reglage bascule"><span class="nom">Démarrer avec Windows</span><label class="inter"><input type="checkbox" id="demarrage"><span></span></label></div>
+      <div class="reglage">
+        <div class="nom">Fenêtre du jeu</div>
+        <input class="champ" id="fenetre" spellcheck="false">
+      </div>
+      <div class="boutons">
+        <button class="btn" id="b-sim">Simulation</button>
+        <button class="btn" id="b-dossier">Dossier des lettres</button>
+        <button class="btn danger" id="b-quitter">Quitter Crochetage</button>
+      </div>
+    </section>
+    <section class="panneau" id="p-lettres">
+      <div class="titre-section" id="titre-inconnues">À nommer</div>
+      <div class="lettres" id="inconnues"></div>
+      <div class="titre-section" style="margin-top:10px">Connues</div>
+      <div class="connues" id="connues"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let api = null, onglet = "direct", etat = null, apercuEnCours = false, reglagesCharges = false;
+const COULEURS = { "crocheté": "var(--vert)", "raté": "var(--accent)", "abandonné": "var(--text3)" };
+
+function choisirOnglet(nom) {
+  onglet = nom;
+  const boutons = [...document.querySelectorAll(".onglets button")];
+  const i = boutons.findIndex((b) => b.dataset.p === nom);
+  boutons.forEach((b) => b.classList.toggle("on", b.dataset.p === nom));
+  const c = $("curseur-onglet");
+  c.style.width = `calc((100% - 6px) / 4)`;
+  c.style.transform = `translateX(${i * 100}%)`;
+  document.querySelectorAll(".panneau").forEach((p) => p.classList.toggle("on", p.id === "p-" + nom));
+  if (nom === "lettres") chargerLettres();
+  if (nom === "reglages") chargerReglages();
+}
+
+function ilya(s) {
+  if (s < 60) return `il y a ${Math.round(s)} s`;
+  if (s < 3600) return `il y a ${Math.round(s / 60)} min`;
+  return `il y a ${Math.round(s / 3600)} h`;
+}
+
+function rendreEtat(e) {
+  etat = e;
+  document.body.classList.toggle("actif", e.actif);
+  $("heros").classList.toggle("actif", e.actif);
+  $("etat-titre").textContent = e.actif ? "Actif" : "En pause";
+  $("etat-sous").textContent = e.sous;
+  const puce = $("puce");
+  puce.className = "puce " + (e.jeu.niveau || "");
+  $("puce-texte").textContent = e.jeu.texte;
+  $("s-croch").textContent = e.stats.crochetes;
+  $("s-taux").textContent = e.stats.taux === null ? "–" : e.stats.taux + " %";
+  $("s-duree").textContent = e.stats.duree === null ? "–" : e.stats.duree.toFixed(1).replace(".", ",") + " s";
+  const b = $("badge");
+  b.hidden = !e.a_nommer;
+  b.textContent = e.a_nommer;
+  const h = $("historique");
+  if (!e.historique.length) {
+    h.innerHTML = '<div class="rien">Aucun crochetage pour l\'instant.</div>';
+  } else {
+    h.innerHTML = e.historique.map((c) => {
+      const titre = c.resultat === "crocheté" ? (c.bot ? "Crocheté" : "Crocheté à la main")
+        : c.resultat === "raté" ? `Raté au check ${c.nb_checks}` : "Abandonné";
+      return `<div class="ligne"><i style="background:${COULEURS[c.resultat] || "var(--text3)"}"></i>
+        <span class="t">${titre}</span><span class="d">${c.reussis}/${c.nb_checks} · ${c.duree.toFixed(1).replace(".", ",")} s<br>${ilya(c.age)}</span></div>`;
+    }).join("");
+  }
+}
+
+function dessinerApercu(a) {
+  const cv = $("canvas"), ctx = cv.getContext("2d");
+  const W = cv.width, c = W / 2;
+  $("vide").style.display = a.image ? "none" : "grid";
+  $("legende").textContent = a.legende || "";
+  if (!a.image) { ctx.clearRect(0, 0, W, W); return; }
+  const img = new Image();
+  img.onload = () => {
+    ctx.clearRect(0, 0, W, W);
+    ctx.drawImage(img, 0, 0, W, W);
+    const R = W / 2 * a.r_ext;
+    ctx.lineCap = "round";
+    if (a.barre) {
+      ctx.strokeStyle = "rgba(127,219,255,.95)"; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.arc(c, c, R + 9, a.barre[0] * Math.PI / 180, a.barre[1] * Math.PI / 180); ctx.stroke();
+    }
+    if (a.cible !== null && a.cible !== undefined) {
+      const t = a.cible * Math.PI / 180;
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(c + (R + 9) * Math.cos(t), c + (R + 9) * Math.sin(t), 4.5, 0, 7); ctx.fill();
+    }
+    if (a.aiguille !== null && a.aiguille !== undefined) {
+      const t = a.aiguille * Math.PI / 180;
+      ctx.fillStyle = "#ff5a5f"; ctx.beginPath(); ctx.arc(c + (R + 9) * Math.cos(t), c + (R + 9) * Math.sin(t), 5, 0, 7); ctx.fill();
+    }
+  };
+  img.src = a.image;
+}
+
+async function boucleEtat() {
+  try { rendreEtat(await api.etat()); } catch (err) {}
+  setTimeout(boucleEtat, 250);
+}
+
+async function boucleApercu() {
+  if (onglet === "direct" && !document.hidden && !apercuEnCours) {
+    apercuEnCours = true;
+    try { dessinerApercu(await api.apercu()); } catch (err) {}
+    apercuEnCours = false;
+  }
+  setTimeout(boucleApercu, 90);
+}
+
+function majCurseur(input, val, fmt) {
+  const p = (input.value - input.min) / (input.max - input.min) * 100;
+  input.style.setProperty("--p", p + "%");
+  val.textContent = fmt(input.value);
+}
+
+async function chargerReglages() {
+  const r = await api.reglages();
+  const lier = (id, cle, fmt, versCfg, depuisCfg) => {
+    const input = $("r-" + id), val = $("v-" + id);
+    input.value = depuisCfg(r[cle]);
+    majCurseur(input, val, fmt);
+    if (!reglagesCharges) {
+      input.addEventListener("input", () => majCurseur(input, val, fmt));
+      input.addEventListener("change", () => api.reglage(cle, versCfg(+input.value)));
+    }
+  };
+  lier("cible", "cible", (v) => v + " %", (v) => v / 100, (v) => Math.round(v * 100));
+  lier("latence", "latence_ms", (v) => v + " ms", (v) => v, (v) => v);
+  lier("seuil", "seuil", (v) => v + " %", (v) => v / 100, (v) => Math.round(v * 100));
+  document.querySelectorAll("input[data-cle]").forEach((cb) => {
+    cb.checked = !!r[cb.dataset.cle];
+    if (!reglagesCharges) cb.addEventListener("change", () => api.reglage(cb.dataset.cle, cb.checked));
+  });
+  $("demarrage").checked = !!r.demarrage;
+  $("fenetre").value = r.fenetre_cible || "";
+  if (!reglagesCharges) {
+    $("demarrage").addEventListener("change", (ev) => api.demarrage(ev.target.checked));
+    $("fenetre").addEventListener("change", (ev) => api.reglage("fenetre_cible", ev.target.value.trim() || null));
+  }
+  reglagesCharges = true;
+}
+
+async function chargerLettres() {
+  const l = await api.lettres();
+  const box = $("inconnues");
+  $("titre-inconnues").textContent = l.inconnues.length ? `À nommer · ${l.inconnues.length}` : "À nommer";
+  box.innerHTML = l.inconnues.length ? "" : '<div class="rien" style="grid-column:span 2;padding:12px">Rien à nommer.</div>';
+  l.inconnues.forEach((x) => {
+    const d = document.createElement("div");
+    d.className = "lettre";
+    d.innerHTML = `<img src="${x.image}"><input maxlength="1" placeholder="?">`;
+    const input = d.querySelector("input");
+    input.addEventListener("keydown", async (ev) => {
+      if (ev.key === "Enter") { await api.nommer(x.chemin, input.value); chargerLettres(); }
+      if (ev.key === "Delete") { await api.nommer(x.chemin, ""); chargerLettres(); }
+    });
+    box.appendChild(d);
+  });
+  $("connues").innerHTML = l.connues.map((c) => `<span>${c}</span>`).join("") || '<span style="width:auto;padding:0 8px;color:var(--text3)">aucune</span>';
+}
+
+window.addEventListener("pywebviewready", async () => {
+  api = window.pywebview.api;
+  const info = await api.infos();
+  $("logo").src = info.logo;
+  document.querySelectorAll(".onglets button").forEach((b) => b.addEventListener("click", () => choisirOnglet(b.dataset.p)));
+  $("marche").addEventListener("click", () => api.basculer());
+  $("cacher").addEventListener("click", () => api.cacher());
+  $("b-sim").addEventListener("click", () => api.simulation());
+  $("b-dossier").addEventListener("click", () => api.dossier_lettres());
+  $("b-quitter").addEventListener("click", () => api.quitter());
+  choisirOnglet("direct");
+  boucleEtat();
+  boucleApercu();
+});
+window.addEventListener("blur", () => { if (api) api.perte_focus(); });
+window.addEventListener("focus", () => { if (api) api.focus(); });
+</script>
+</body>
+</html>

@@ -47,6 +47,7 @@ class Simulation:
         self.injection = queue.Queue()
         self.moteur = None
         self.overlay = None
+        self.logo = None
         self.thread_bot = None
         self.stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.j = at.Journal("sim_verite", True, self.stamp)
@@ -557,6 +558,8 @@ class Simulation:
             print(f"[sim] Rapport impossible : {e}")
         if self.overlay:
             self.overlay.fermer()
+        if self.logo:
+            self.logo.fermer()
         self.root.destroy()
 
     def preparer_bot(self):
@@ -649,12 +652,20 @@ class Simulation:
         self.root.focus_force()
         self.j.ev("premier_plan", titre=at.titre_premier_plan())
 
+    def _tick_logo(self):
+        if self.logo and not self.logo.ferme:
+            self.logo.pas()
+            self.root.after(25, self._tick_logo)
+
     def demarrer(self):
         if not self.args.sans_bot:
             self.demarrer_bot(self.preparer_bot())
             if not self.args.sans_overlay:
                 self.overlay = overlay.OverlayAnneau(self.root, lambda: self.moteur, lambda m: m.actif,
                                                      f=self.root.winfo_fpixels("1i") / 96.0)
+                self.logo = overlay.LogoAnime(lambda: self.moteur, lambda m: m.actif,
+                                              os.path.join(at.BASE, "logo.png"))
+                self._tick_logo()
         self.premier_plan()
         self.t_tick = self.t_debut = time.perf_counter()
         self.t_suivant = self.t_debut + 1.5

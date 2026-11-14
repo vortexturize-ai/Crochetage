@@ -2,6 +2,7 @@ import ctypes
 import ctypes.wintypes as wt
 import math
 import os
+import threading
 import time
 import traceback
 
@@ -65,6 +66,10 @@ u32.GetDC.argtypes = [wt.HWND]
 u32.GetDC.restype = wt.HDC
 u32.ReleaseDC.argtypes = [wt.HWND, wt.HDC]
 u32.GetSystemMetrics.argtypes = [ctypes.c_int]
+u32.PeekMessageW.argtypes = [ctypes.POINTER(wt.MSG), wt.HWND, wt.UINT, wt.UINT, wt.UINT]
+u32.TranslateMessage.argtypes = [ctypes.POINTER(wt.MSG)]
+u32.DispatchMessageW.argtypes = [ctypes.POINTER(wt.MSG)]
+u32.DispatchMessageW.restype = LRESULT
 u32.UpdateLayeredWindow.argtypes = [wt.HWND, wt.HDC, ctypes.POINTER(wt.POINT), ctypes.POINTER(wt.SIZE), wt.HDC,
                                     ctypes.POINTER(wt.POINT), wt.COLORREF, ctypes.POINTER(BLENDFUNCTION), wt.DWORD]
 u32.UpdateLayeredWindow.restype = wt.BOOL
@@ -368,7 +373,8 @@ class OverlayAnneau:
         self.alpha, self.t_prec, self.t_top = 0.0, time.perf_counter(), 0.0
         self.signature, self.pos = None, None
         self.nb_ticks, self.nb_rendus, self.erreur = 0, 0, None
-        root.after(self.periode, self._tick)
+        if root is not None:
+            root.after(self.periode, self._tick)
 
     def exclusion(self, oui):
         return bool(u32.SetWindowDisplayAffinity(self.fenetre.hwnd, WDA_EXCLUDEFROMCAPTURE if oui else 0))
@@ -377,7 +383,7 @@ class OverlayAnneau:
         self.ferme = True
         self.fenetre.fermer()
 
-    def _tick(self):
+    def pas(self):
         if self.ferme:
             return
         self.nb_ticks += 1
@@ -390,6 +396,11 @@ class OverlayAnneau:
                 m = self.moteur_fn()
                 if m is not None and hasattr(m, "ev"):
                     m.ev("erreur", ou="overlay", trace=erreur)
+
+    def _tick(self):
+        if self.ferme:
+            return
+        self.pas()
         self.root.after(self.periode, self._tick)
 
     def maj(self):
@@ -429,3 +440,183 @@ class OverlayAnneau:
         img = self.rendu.dessiner(e)
         self.nb_rendus += 1
         self.fenetre.afficher(img, x0, y0, 255 * self.alpha)
+
+
+def _logo_carre(chemin, cote):
+    im = Image.open(chemin).convert("RGBA")
+    bbox = im.getchannel("A").point(lambda a: 255 if a > 90 else 0).getbbox()
+    if bbox:
+        im = im.crop(bbox)
+    s = max(im.size)
+    carre = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    carre.paste(im, ((s - im.width) // 2, (s - im.height) // 2))
+    return carre.resize((cote, cote), Image.LANCZOS)
+
+
+def _premult(rgba):
+    a = rgba[..., 3:4].astype(np.float32) / 255.0
+    out = rgba.astype(np.float32)
+    out[..., :3] *= a
+    return np.ascontiguousarray(np.concatenate([out[..., 2::-1], out[..., 3:4]], axis=2))
+
+
+class LogoAnime:
+    FONDU_S = 0.3
+
+    def __init__(self, moteur_fn, visible_fn, chemin_logo, exclure=True):
+        self.moteur_fn, self.visible_fn = moteur_fn, visible_fn
+        self.fenetre = FenetreCouche(exclure)
+        H = u32.GetSystemMetrics(1)
+        W = u32.GetSystemMetrics(0)
+        self.u = u = max(0.7, H / 1080.0)
+        self.cote = int(round(150 * u))
+        self.x = int(W - self.cote - 14 * u)
+        self.y = int(H - self.cote - 92 * u)
+        self.t0 = time.perf_counter()
+        self.alpha, self.t_prec, self.t_top = 0.0, self.t0, 0.0
+        self.ferme, self.erreur, self.nb_rendus, self.t_rendu = False, None, 0, 0.0
+        self._preparer(chemin_logo)
+
+    def _preparer(self, chemin):
+        u, C = self.u, self.cote
+        b = int(round(62 * u))
+        k = 4
+        grand = np.zeros((b * k, b * k, 4), np.uint8)
+        r = int(b * k * 0.26)
+        coul = (16, 13, 12, 245)
+        cv2.rectangle(grand, (r, 0), (b * k - 1 - r, b * k - 1), coul, -1, cv2.LINE_AA)
+        cv2.rectangle(grand, (0, r), (b * k - 1, b * k - 1 - r), coul, -1, cv2.LINE_AA)
+        for cx, cy in ((r, r), (b * k - 1 - r, r), (r, b * k - 1 - r), (b * k - 1 - r, b * k - 1 - r)):
+            cv2.circle(grand, (cx, cy), r, coul, -1, cv2.LINE_AA)
+        badge = Image.fromarray(cv2.cvtColor(grand, cv2.COLOR_BGRA2RGBA)).resize((b, b), Image.LANCZOS)
+        try:
+            logo = _logo_carre(chemin, int(b * 0.72))
+            badge.alpha_composite(logo, ((b - logo.width) // 2, (b - logo.height) // 2))
+        except Exception:
+            pass
+        self.badge = _premult(np.asarray(badge))
+        yy, xx = np.mgrid[0:C, 0:C].astype(np.float32)
+        d = np.hypot(xx - C / 2, yy - C / 2) / (C / 2)
+        self.halo = (np.clip(1.0 - d, 0, 1) ** 2.2)[..., None]
+
+    def fermer(self):
+        self.ferme = True
+        self.fenetre.fermer()
+
+    def pas(self):
+        if self.ferme:
+            return
+        try:
+            self.maj()
+        except Exception:
+            erreur = traceback.format_exc()
+            if erreur != self.erreur:
+                self.erreur = erreur
+                m = self.moteur_fn()
+                if m is not None and hasattr(m, "ev"):
+                    m.ev("erreur", ou="logo", trace=erreur)
+
+    def maj(self):
+        now = time.perf_counter()
+        dt, self.t_prec = now - self.t_prec, now
+        m = self.moteur_fn()
+        visible = m is not None and self.visible_fn(m)
+        cible = 1.0 if visible else 0.0
+        pas = dt / self.FONDU_S
+        self.alpha = min(cible, self.alpha + pas) if self.alpha < cible else max(cible, self.alpha - pas)
+        if self.alpha <= 0.0:
+            self.fenetre.cacher()
+            return
+        if now - self.t_rendu >= 1 / 40.0:
+            self.t_rendu = now
+            img = self.dessiner(now - self.t0, self._evenements(m, now) if m is not None else {})
+            self.nb_rendus += 1
+            self.fenetre.afficher(img, self.x, self.y, 255 * self.alpha)
+        else:
+            self.fenetre.alpha(255 * self.alpha)
+        if now - self.t_top > 0.5:
+            self.t_top = now
+            self.fenetre.devant()
+
+    @staticmethod
+    def _evenements(m, now):
+        e = {}
+        dc = getattr(getattr(m, "suivi", None), "dernier_cycle", None)
+        if dc and now - dc["t"] < 1.4 and dc.get("bot", True):
+            e["fin"] = (dc["resultat"], (now - dc["t"]) / 1.4)
+        if now - getattr(m, "t_appui", -9.0) < 0.35:
+            e["appui"] = (now - m.t_appui) / 0.35
+        e["cercle"] = bool(getattr(m, "cercle", False) and getattr(m, "an", None) is not None)
+        return e
+
+    def dessiner(self, t, ev):
+        u, C = self.u, self.cote
+        fin = ev.get("fin")
+        teinte = VERT if (fin and fin[0] == "crocheté") else ROUGE
+        respire = 0.5 + 0.5 * math.sin(2 * math.pi * t / 1.8)
+        intensite = 0.30 + 0.16 * respire + (0.22 if ev.get("cercle") else 0.0)
+        if fin:
+            intensite += 0.45 * (1.0 - fin[1])
+        img = np.array(pm(teinte, 1.0), np.float32) * (self.halo * min(1.0, intensite))
+        k = 3
+        couche = np.zeros((C * k, C * k, 4), np.uint8)
+        dy = 3 * u * math.sin(2 * math.pi * t / 2.6)
+        cx, cy = C * k / 2, (C / 2 + dy) * k
+        vitesse = 150 if ev.get("cercle") else 70
+        rr = 46 * u * k
+        ep = max(1, int(round(2.2 * u * k)))
+        for base in (0, 180):
+            a0 = (t * vitesse + base) % 360
+            for i in range(10):
+                seg0 = a0 + i * 7
+                cv2.ellipse(couche, (int(cx * 16), int(cy * 16)), (int(rr * 16), int(rr * 16)), 0, seg0, seg0 + 7.5,
+                            pm(teinte, 0.9 * (i + 1) / 10), ep, cv2.LINE_AA, 4)
+        if ev.get("appui") is not None:
+            p = ev["appui"]
+            r2 = (46 + 16 * p) * u * k
+            cv2.circle(couche, (int(cx * 16), int(cy * 16)), int(r2 * 16), pm(BLANC, 0.7 * (1 - p)),
+                       max(1, int(round(2 * u * k))), cv2.LINE_AA, 4)
+        couche = cv2.resize(couche, (C, C), interpolation=cv2.INTER_AREA).astype(np.float32)
+        img = couche + img * (1.0 - couche[..., 3:4] / 255.0)
+        b = self.badge.shape[0]
+        M = np.float32([[1, 0, (C - b) / 2], [0, 1, (C - b) / 2 + dy]])
+        badge = cv2.warpAffine(self.badge, M, (C, C), flags=cv2.INTER_LINEAR, borderValue=(0, 0, 0, 0))
+        img = badge + img * (1.0 - badge[..., 3:4] / 255.0)
+        return np.clip(img + 0.5, 0, 255).astype(np.uint8)
+
+
+class Animateur(threading.Thread):
+    PM_REMOVE = 1
+
+    def __init__(self, fabriques, periode_s=1 / 60.0):
+        super().__init__(daemon=True, name="overlays")
+        self.fabriques, self.periode = fabriques, periode_s
+        self.elements, self.stop = [], False
+        self.pret = threading.Event()
+
+    def run(self):
+        for f in self.fabriques:
+            try:
+                self.elements.append(f())
+            except Exception:
+                traceback.print_exc()
+        self.pret.set()
+        msg = wt.MSG()
+        prochain = time.perf_counter()
+        while not self.stop:
+            while u32.PeekMessageW(ctypes.byref(msg), None, 0, 0, self.PM_REMOVE):
+                u32.TranslateMessage(ctypes.byref(msg))
+                u32.DispatchMessageW(ctypes.byref(msg))
+            for el in self.elements:
+                el.pas()
+            prochain += self.periode
+            reste = prochain - time.perf_counter()
+            if reste > 0:
+                time.sleep(reste)
+            else:
+                prochain = time.perf_counter()
+        for el in self.elements:
+            el.fermer()
+
+    def arreter(self):
+        self.stop = True

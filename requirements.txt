@@ -4,3 +4,4 @@ numpy
 pystray
 pillow
 dxcam
+pywebview
