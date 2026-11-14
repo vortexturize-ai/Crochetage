@@ -1798,7 +1798,8 @@ class Moteur:
                     self.nb_rates = self.suivi.stats["crochetages_rates"]
 
                     if nouvelle:
-                        inconnue = (not fixe and reconnu is None and barre is not None and lettre_plausible(gris))
+                        inconnue = (self.jeu_devant and self.serveur_ok and not fixe and reconnu is None
+                                    and barre is not None and lettre_plausible(gris))
                         self.inconnue = inconnue
                     if inconnue and nouvelle:
                         f = self.collecteur.voir(gris)
