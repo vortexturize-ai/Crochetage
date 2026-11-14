@@ -49,6 +49,7 @@ DEFAULT_CONFIG = {
     "taille_lettre": 0.20,
     "anneau": [0.55, 1.05],
     "anneau_auto": True,
+    "zone_jeu": True,
     "fenetre_cible": None,
     "serveur_cible": "bay.life",
     "apprentissage_auto": True,
@@ -368,7 +369,95 @@ def _masque(hsv, plages):
     return m
 
 
-def detecter_cercle(img, cfg, centre_recherche=None, rayon_recherche=None):
+JEU_1080 = {"dx": 8.0, "dy": 9.1, "r_in": 65.1, "r_out": 82.2}
+ECART_TAILLE = (0.75, 1.35)
+ECART_CENTRE = 0.12
+
+
+def geometrie_jeu(mon):
+    k = mon["height"] / 1080.0
+    cx = mon["left"] + (mon["width"] - 1) / 2.0 + JEU_1080["dx"] * k
+    cy = mon["top"] + (mon["height"] - 1) / 2.0 + JEU_1080["dy"] * k
+    return {"centre": (cx, cy), "rayon": JEU_1080["r_out"] * k,
+            "anneau_px": (JEU_1080["r_in"] * k, JEU_1080["r_out"] * k)}
+
+
+def zone_plausible(zone, mon):
+    if not zone:
+        return False
+    g = geometrie_jeu(mon)
+    attendu = 2 * g["rayon"] + 4
+    cx, cy = zone["left"] + zone["width"] / 2.0, zone["top"] + zone["height"] / 2.0
+    return (ECART_TAILLE[0] <= zone["width"] / attendu <= ECART_TAILLE[1]
+            and np.hypot(cx - g["centre"][0], cy - g["centre"][1]) <= ECART_CENTRE * mon["height"])
+
+
+def couverture_anneau(hsv, cx, cy, rayon, cfg):
+    h, w = hsv.shape[:2]
+    a = np.radians(np.arange(0.0, 360.0, 2.0))
+
+    def tour(f0, f1, n):
+        rr = rayon * np.linspace(f0, f1, n)
+        xs = np.round(cx + np.outer(rr, np.cos(a))).astype(int)
+        ys = np.round(cy + np.outer(rr, np.sin(a))).astype(int)
+        vu = (xs >= 0) & (xs < w) & (ys >= 0) & (ys < h)
+        return np.ascontiguousarray(hsv[np.clip(ys, 0, h - 1), np.clip(xs, 0, w - 1)]), vu.mean()
+
+    bande, v1 = tour(0.84, 0.96, 4)
+    dehors, v2 = tour(1.05, 1.12, 3)
+    dedans, v3 = tour(0.68, 0.75, 3)
+    if min(v1, v2, v3) < 0.9:
+        return 0.0
+    couleur = ((_masque(bande, _plages(cfg, "bleu_hsv")) > 0)
+               | (_masque(bande, _plages(cfg, "rouge_hsv")) > 0)).mean(axis=0) >= 0.5
+    vb = np.median(bande[..., 2].astype(np.int16), axis=0)
+    vo = np.median(dehors[..., 2].astype(np.int16), axis=0)
+    vi = np.median(dedans[..., 2].astype(np.int16), axis=0)
+    noir = (vb <= 30) & ((vo - vb >= 6) | (vi - vb >= 6))
+    return float((noir | couleur).mean())
+
+
+COUVERTURE_MIN = 0.75
+TOUR_FIN = np.radians(np.arange(0.0, 360.0, 3.0))
+
+
+def _contraste_anneau(v, cx, cy, r_out):
+    h, w = v.shape
+    r_in = r_out * JEU_1080["r_in"] / JEU_1080["r_out"]
+    cos, sin = np.cos(TOUR_FIN), np.sin(TOUR_FIN)
+
+    def moyenne(r0, r1):
+        rr = np.linspace(r0, r1, 3)
+        xs = np.clip(np.round(cx + np.outer(rr, cos)).astype(int), 0, w - 1)
+        ys = np.clip(np.round(cy + np.outer(rr, sin)).astype(int), 0, h - 1)
+        return v[ys, xs].mean(axis=0)
+
+    ext = np.clip(moyenne(r_out + 2, r_out + 5) - moyenne(r_out - 5, r_out - 2), 0, 60)
+    inte = np.clip(moyenne(r_in - 5, r_in - 2) - moyenne(r_in + 2, r_in + 5), 0, 60)
+    return float(ext.mean() + inte.mean())
+
+
+def affiner_anneau(v, cx, cy, r_out, r_attendu=None, portee=8):
+    v = v.astype(np.float32)
+    if r_attendu:
+        r_out, lo, hi = r_attendu, 0.96 * r_attendu, 1.04 * r_attendu
+    else:
+        lo, hi = 0.88 * r_out, 1.12 * r_out
+    best = (_contraste_anneau(v, cx, cy, r_out), cx, cy, r_out)
+    for pas, port, ks in ((2.0, portee, np.linspace(0.96, 1.04, 5)), (1.0, 2, np.linspace(0.98, 1.02, 5)),
+                          (0.5, 1, np.linspace(0.99, 1.01, 3))):
+        _, bx, by, br = best
+        for dx in np.arange(-port, port + 1e-6, pas):
+            for dy in np.arange(-port, port + 1e-6, pas):
+                for k in ks:
+                    r = min(hi, max(lo, br * k))
+                    c = _contraste_anneau(v, bx + dx, by + dy, r)
+                    if c > best[0]:
+                        best = (c, bx + dx, by + dy, r)
+    return best
+
+
+def detecter_cercle(img, cfg, centre_recherche=None, rayon_recherche=None, r_attendu=None):
     if img.ndim == 3 and img.shape[2] == 4:
         img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
     H, W = img.shape[:2]
@@ -385,7 +474,10 @@ def detecter_cercle(img, cfg, centre_recherche=None, rayon_recherche=None):
         return None
 
     gris = cv2.GaussianBlur(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), (5, 5), 1.5)
-    rmin, rmax = int(min(H, W) * 0.025), int(min(H, W) * 0.17)
+    if r_attendu:
+        rmin, rmax = int(ECART_TAILLE[0] * r_attendu), int(np.ceil(ECART_TAILLE[1] * r_attendu))
+    else:
+        rmin, rmax = int(min(H, W) * 0.025), int(min(H, W) * 0.17)
     cands = []
     for p2 in (35, 28, 22, 16):
         cs = cv2.HoughCircles(gris, cv2.HOUGH_GRADIENT, dp=1, minDist=6, param1=50, param2=p2,
@@ -416,7 +508,11 @@ def detecter_cercle(img, cfg, centre_recherche=None, rayon_recherche=None):
         nr = np.count_nonzero((dr > 0.45) & (dr < 1.08))
         if nr < 4:
             continue
-        score = nb + 3 * nr
+        r_ext = max(R, float(np.percentile(db[sel][bloc], 98)) * R)
+        couv = couverture_anneau(hsv, x, y, r_ext, cfg)
+        if couv < COUVERTURE_MIN:
+            continue
+        score = (round(couv * 50), nb + 3 * nr)
         if best is None or score > best[0]:
             best = (score, x, y, R)
     if best is None:
@@ -431,6 +527,7 @@ def detecter_cercle(img, cfg, centre_recherche=None, rayon_recherche=None):
             lx, ly = float(xw[sel].mean()), float(yw[sel].mean())
             if np.hypot(lx - x, ly - y) < 6:
                 x, y = (x + lx) / 2, (y + ly) / 2
+    _, x, y, R = affiner_anneau(hsv[..., 2], x, y, R, r_attendu)
 
     def rayons(xs, ys, rmin, rmax):
         d = np.hypot(xs - x, ys - y)
@@ -485,7 +582,7 @@ def _traits_aiguille(nouveau):
     return traits
 
 
-def detecter_cercle_anime(prendre, cfg, duree=1.2):
+def detecter_cercle_anime(prendre, cfg, duree=1.2, r_attendu=None):
     rouge_pl, bleu_pl = _plages(cfg, "rouge_hsv"), _plages(cfg, "bleu_hsv")
     noyau = np.ones((3, 3), np.uint8)
     passe, traits, derniere, n = [], [], None, 0
@@ -522,6 +619,9 @@ def detecter_cercle_anime(prendre, cfg, duree=1.2):
             continue
         c = np.linalg.solve(A, [c_[i], c_[j]])
         ok = np.abs(N @ c - c_) < 3.0
+        if r_attendu:
+            d = np.hypot(P[:, 0] - c[0], P[:, 1] - c[1])
+            ok &= (d > 0.5 * r_attendu) & (d < 1.1 * r_attendu)
         if meilleur is None or ok.sum() > meilleur.sum():
             meilleur = ok
     if meilleur is None or meilleur.sum() < 6:
@@ -543,6 +643,11 @@ def detecter_cercle_anime(prendre, cfg, duree=1.2):
     centre = v[max(0, int(cy) - c):int(cy) + c, max(0, int(cx) - c):int(cx) + c]
     if centre.size == 0 or not (np.median(centre) < 90 and centre.max() > 150):
         return _rien(f"pas de lettre au centre trouvé en {cx:.0f}, {cy:.0f}")
+    if r_attendu and not ECART_TAILLE[0] <= r_out / r_attendu <= ECART_TAILLE[1]:
+        return _rien(f"rayon {r_out:.0f} px, l'anneau du jeu fait {r_attendu:.0f} px")
+    couv = couverture_anneau(derniere, cx, cy, r_out, cfg)
+    if couv < COUVERTURE_MIN:
+        return _rien(f"pas d'anneau noir autour de {cx:.0f}, {cy:.0f} : {couv:.0%} du tour")
     return {"centre": (float(cx), float(cy)), "rayon": r_out, "anneau_px": (r_in, r_out)}
 
 
@@ -562,13 +667,21 @@ def zone_recherche(mon):
 
 
 def trouver_cercle(sct, cfg, mon, duree=1.2):
+    r_att = geometrie_jeu(mon)["rayon"] if cfg.get("zone_jeu", True) else None
     zr = zone_recherche(mon)
-    det = detecter_cercle_anime(lambda: np.asarray(sct.grab(zr)), cfg, duree)
-    if det:
-        return appliquer_detection(cfg, det, (zr["left"], zr["top"]))
-    det = detecter_cercle(np.asarray(sct.grab(mon)), cfg)
-    if det:
-        return appliquer_detection(cfg, det, (mon["left"], mon["top"]))
+    essais = ((lambda: detecter_cercle_anime(lambda: np.asarray(sct.grab(zr)), cfg, duree, r_attendu=r_att), zr),
+              (lambda: detecter_cercle(np.asarray(sct.grab(mon)), cfg, r_attendu=r_att), mon))
+    for detecter, origine in essais:
+        det = detecter()
+        if not det:
+            continue
+        essai = appliquer_detection(json.loads(json.dumps(cfg)), det, (origine["left"], origine["top"]))
+        if r_att and not zone_plausible(essai["zone"], mon):
+            _rien(f"cercle en {det['centre'][0] + origine['left']:.0f}, {det['centre'][1] + origine['top']:.0f} "
+                  f"trop loin de l'anneau du jeu")
+            continue
+        cfg.update(essai)
+        return cfg
     return None
 
 
@@ -1265,6 +1378,7 @@ class Moteur:
         self.nb_crochetages = self.nb_rates = 0
         self.jeu_devant, self.serveur_ok, self.serveur_url = False, True, None
         self.fivem_lance = False
+        self.sct = None
         self.dernier = ""
         self.version_config = 0
         self.an = None
@@ -1297,6 +1411,17 @@ class Moteur:
     def _init_zone(self):
         zone = self.cfg.get("zone")
         self.an = None
+        if self.cfg.get("zone_jeu", True) and self.sct is not None:
+            mon = moniteur_principal(self.sct)
+            if not zone_plausible(zone, mon):
+                appliquer_detection(self.cfg, geometrie_jeu(mon))
+                sauver_config(self.cfg)
+                nouvelle = self.cfg["zone"]
+                if zone:
+                    self.log(f"Zone de {zone['width']} px hors de l'anneau du jeu : remplacée par la zone de base, "
+                             f"{nouvelle['width']} px au centre de l'écran")
+                self.ev("zone_base", ancienne=zone, zone=nouvelle, anneau=self.cfg["anneau"])
+                zone = nouvelle
         if not zone:
             return
         self.zone = zone
@@ -1415,10 +1540,10 @@ class Moteur:
         t_perf, n_perf = time.perf_counter(), 0
         hist, t_hist = deque(maxlen=60), 0.0
         captures = bool(cfg.get("captures_echec", True)) and self.j.f is not None
-        self._init_zone()
 
         with MSS() as sct:
             self.sct = sct
+            self._init_zone()
             cap = Capture(sct, str(cfg.get("capture") or "auto").lower())
             self.capture_mode = cap.mode
             if cap.raison:
@@ -1689,7 +1814,8 @@ def tester_image(cfg, chemin):
         print("Image illisible :", chemin)
         return 1
     if max(img.shape[:2]) > 600:
-        det = detecter_cercle(img, cfg)
+        r_att = JEU_1080["r_out"] * img.shape[0] / 1080.0 if cfg.get("zone_jeu", True) else None
+        det = detecter_cercle(img, cfg, r_attendu=r_att)
         if det is None:
             print("Cercle pas trouvé dans l'image.")
             return 1

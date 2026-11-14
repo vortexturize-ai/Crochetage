@@ -96,8 +96,13 @@ pas disponible. Mesuré sur la zone de 168 px :
 Le timing ne change pas d'une capture à l'autre (même `latence_ms`) : en simulation, écart moyen entre
 appui prévu et réel de −3,9 ms en DXGI contre −4,3 ms en mss.
 
-### 1. Trouver le cercle (touche F7)
-Pas besoin de régler une zone à la souris. Pendant qu'un crochetage tourne, **F7** lance la détection :
+### 1. Trouver le cercle
+Sur Baylife, l'anneau s'ouvre toujours **au centre de l'écran**, avec un rayon extérieur de **82 px en
+1080p** (164 px de diamètre), proportionnel à la hauteur de l'écran. Au démarrage, le bot se place
+directement sur cette **zone de base** : rien à régler. Une zone enregistrée qui ne colle pas à
+l'anneau du jeu, trop grande, trop petite ou trop loin du centre, est remplacée automatiquement.
+
+**F7** sert à recaler la zone pendant qu'un crochetage tourne :
 1. pendant ~1 s, le bot ne garde que le rouge **qui vient d'apparaître** (l'aiguille qui bouge) ;
 2. à chaque image, l'aiguille devient un petit **trait qui pointe vers le centre** (axe principal du bloc
    de pixels, par ACP) ;
@@ -105,6 +110,11 @@ Pas besoin de régler une zone à la souris. Pendant qu'un crochetage tourne, **
    moins d'un pixel près. Les traits du décor (une voiture rouge qui passe) ne se croisent pas au même
    endroit : ils sont éliminés ;
 4. l'épaisseur de l'anneau vient de la longueur de l'aiguille.
+
+Un cercle n'est retenu que s'il ressemble à l'anneau du jeu : rayon entre 0,75 et 1,35 fois celui
+attendu, centre près du milieu de l'écran, et **anneau noir sur au moins 75 % du tour**, plus sombre
+que le décor juste dedans ou juste dehors. Si l'aiguille ne suffit pas, une détection sur image fixe
+prend le relais, puis le centre est affiné en cherchant les bords nets de l'anneau noir.
 
 <p align="center">
   <img src="docs/detection_reelle.png" alt="Détection sur une vraie capture" width="320"><br>
@@ -200,6 +210,9 @@ Réglage `overlay` dans `config.json`. La simulation l'affiche aussi (`--sans-ov
   la barre passe au vert), le bot enregistre l'image comme modèle.
 - Ou **F8** puis la lettre, ou bien en tapant la lettre dans l'appli (« à nommer »).
 
+Les lettres s'apprennent **en jeu** : la police de Baylife n'est pas celle de la simulation. Tant
+qu'une lettre est inconnue, le bot ne la joue pas et garde son image dans `templates/a_renommer/`.
+
 ### Résultats des tests
 | Test | Résultat |
 |---|---|
@@ -211,6 +224,9 @@ Réglage `overlay` dans `config.json`. La simulation l'affiche aussi (`--sans-ov
 | Le bot sait-il s'il a réussi ? | d'accord avec la vérité sur **49 / 49** crochetages |
 | Détection du cercle sur 200 scènes générées (nuit, voitures bleues/rouges collées) | **192 / 200**, centre à < 1 px |
 | Vraie capture du jeu | cercle, barre et aiguille trouvés au pixel près |
+| Détection sur 26 scènes : vraie capture, leurres rouges en mouvement, décors de la simulation | centre à **0 px** en médiane, **1,6 px** au pire |
+| Faux cercles de 195 px trouvés avant sur Baylife | rejetés : anneau noir sur 24 à 32 % du tour seulement |
+| En jeu sur Baylife, zone de base | anneau et barre lus sur **144 / 144** images, lettre inconnue gardée pour l'apprendre |
 
 ---
 
@@ -256,7 +272,8 @@ chaque raté, et **les réglages à changer** :
    logo apparaît près de l'horloge (sinon, regarde dans la flèche `^`). Il est rouge quand le bot est
    actif, gris en pause. Un nouveau clic sur le lanceur ouvre la fenêtre de l'appli.
 2. Mets le jeu en **fenêtré sans bordure** (en plein écran exclusif, la capture d'écran sort noire).
-3. Lance un crochetage, puis appuie sur **F7** pendant que l'aiguille tourne : « Cercle trouvé ».
+3. Rien à régler : la zone se place toute seule sur l'anneau, au centre de l'écran. Au premier
+   passage de chaque lettre, joue-la toi-même ou nomme-la dans l'appli pour que le bot l'apprenne.
 4. Appuie sur **F6** pour activer ou mettre en pause.
 
 | Touche | Action |
@@ -309,11 +326,11 @@ python simulation.py --sans-overlay      # sans l'overlay sur l'anneau
 | **Fenêtre du jeu** | Texte que doit contenir le titre de la fenêtre (par défaut « FiveM »). |
 | **Démarrer avec Windows** | Lance l'appli à l'ouverture de session. |
 
-Dans `config.json` : `serveur_cible` (`bay.life` par défaut, vide = tous les serveurs), `overlay` (oui par
-défaut), `capture` (`auto` par défaut, `dxgi` ou `mss`), `journal` (journal détaillé, oui par défaut) et
+Dans `config.json` : `serveur_cible` (`bay.life` par défaut, vide = tous les serveurs), `zone_jeu`
+(zone de base sur l'anneau de Baylife, oui par défaut), `overlay` (oui par défaut), `capture` (`auto` par défaut, `dxgi` ou `mss`), `journal` (journal détaillé, oui par défaut) et
 `captures_echec` (images des ratés, oui par défaut).
 
-- **« Cercle pas trouvé »** : refais F7 pendant que l'aiguille tourne.
+- **« Cercle pas trouvé »** : refais F7 pendant que l'aiguille tourne. La zone de base reste en place.
 - **« PAS envoyé : serveur … »** : tu n'es pas connecté à Baylife (ou FiveM n'a pas encore noté le serveur).
 - **« PAS envoyé : fenêtre active … »** : le jeu n'était pas devant, ou son titre ne contient pas
   « FiveM ». Corrige « Fenêtre du jeu ».

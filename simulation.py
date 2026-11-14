@@ -568,6 +568,7 @@ class Simulation:
             cfg["latence_ms"] = 8
         cfg["fenetre_cible"] = TITRE
         cfg["serveur_cible"] = None
+        cfg["zone_jeu"] = False
 
         self.c.itemconfigure(self.lettre, text="Z")
         self.placer_barre(200, 245)
@@ -586,7 +587,7 @@ class Simulation:
 
             det = None
             for _ in range(3):
-                det = at.detecter_cercle_anime(prendre, cfg, 1.2)
+                det = at.detecter_cercle_anime(prendre, cfg, 1.2, r_attendu=self.R)
                 if det:
                     break
         if det:
